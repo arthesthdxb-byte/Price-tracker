@@ -56,6 +56,7 @@ class DailyScrape(BaseModel):
 class ScrapeUpload(BaseModel):
     scrape_date: str
     brands: Dict[str, Dict[str, float]]
+    set_as_baseline: bool = False
 
 class BrandHistoryItem(BaseModel):
     date: str
@@ -233,10 +234,25 @@ async def upload_scrape(data: ScrapeUpload):
         if scrape_docs:
             await db.scrapes.insert_many(scrape_docs)
         
+        # Update baseline if requested
+        if data.set_as_baseline:
+            await db.baseline.delete_many({})
+            baseline_docs = []
+            for brand_name, items in data.brands.items():
+                baseline_docs.append({
+                    "brand_name": brand_name,
+                    "items": items,
+                    "baseline_date": data.scrape_date,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                })
+            if baseline_docs:
+                await db.baseline.insert_many(baseline_docs)
+        
         return {
             "success": True,
             "scrape_date": data.scrape_date,
-            "brands_count": len(scrape_docs)
+            "brands_count": len(scrape_docs),
+            "baseline_updated": data.set_as_baseline
         }
     except HTTPException:
         raise

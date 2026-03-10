@@ -62,6 +62,7 @@ const Dashboard = () => {
   const [itemFilter, setItemFilter] = useState('all'); // 'all', 'added', 'increased', 'decreased'
   const [viewMode, setViewMode] = useState('dashboard'); // 'dashboard', 'brand-history', 'items-history', 'all-history'
   const [dateOptions] = useState(generateDateOptions());
+  const [setAsBaseline, setSetAsBaseline] = useState(false);
 
   useEffect(() => {
     checkBaseline();
@@ -243,13 +244,20 @@ const Dashboard = () => {
       
       const response = await axios.post(`${API}/scrape`, {
         scrape_date: scrapeDate,
-        brands
+        brands,
+        set_as_baseline: setAsBaseline
       });
 
       if (response.data.success) {
-        toast.success(`✓ Scrape uploaded — ${response.data.brands_count} brands analyzed`);
+        let message = `✓ Scrape uploaded — ${response.data.brands_count} brands analyzed`;
+        if (setAsBaseline) {
+          message += ' (Baseline updated)';
+        }
+        toast.success(message);
         await loadDashboard();
+        await checkBaseline();
         setScrapeDate('');
+        setSetAsBaseline(false);
       }
     } catch (error) {
       console.error('Error uploading scrape:', error);
@@ -1200,6 +1208,27 @@ const Dashboard = () => {
                     ))}
                   </SelectContent>
                 </Select>
+                
+                {/* Set as Baseline Checkbox */}
+                <div className="flex items-center gap-2 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                  <input
+                    type="checkbox"
+                    id="set-as-baseline"
+                    checked={setAsBaseline}
+                    onChange={(e) => setSetAsBaseline(e.target.checked)}
+                    className="w-4 h-4 rounded border-yellow-500/50 bg-[#101014] text-yellow-400 focus:ring-yellow-400 cursor-pointer"
+                    data-testid="set-as-baseline-checkbox"
+                  />
+                  <label htmlFor="set-as-baseline" className="text-yellow-400 text-sm font-medium cursor-pointer">
+                    ⚠️ Also update baseline with this data
+                  </label>
+                </div>
+                {setAsBaseline && (
+                  <p className="text-yellow-400 text-xs">
+                    This will replace the current baseline (24-Feb-26) with data from the selected date. All future comparisons will use this as the new reference point.
+                  </p>
+                )}
+                
                 <Input
                   type="file"
                   accept=".xlsx,.xls"
