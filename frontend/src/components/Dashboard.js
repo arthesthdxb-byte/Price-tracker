@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { Upload, RefreshCw, Download, AlertTriangle, X, TrendingUp, TrendingDown } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { toast } from 'sonner';
 import axios from 'axios';
 
@@ -25,6 +26,27 @@ const BRAND_GROUPS = [
   { own: 'Circle Cafe', competitors: ['LDC', 'Jones the Grocer'] },
 ];
 
+// Generate date options for March 2026
+const generateDateOptions = () => {
+  const dates = [];
+  const months = ['Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  
+  // March dates (1-31)
+  for (let day = 1; day <= 31; day++) {
+    dates.push(`${day}-Mar-26`);
+  }
+  
+  // Add future months (April onwards)
+  for (const month of months.slice(1)) {
+    const daysInMonth = month === 'Apr' || month === 'Jun' || month === 'Sep' || month === 'Nov' ? 30 : 31;
+    for (let day = 1; day <= daysInMonth; day++) {
+      dates.push(`${day}-${month}-26`);
+    }
+  }
+  
+  return dates;
+};
+
 const ALL_BRANDS = BRAND_GROUPS.flatMap(g => [g.own, ...g.competitors]);
 
 const Dashboard = () => {
@@ -39,6 +61,7 @@ const Dashboard = () => {
   const [allHistory, setAllHistory] = useState(null);
   const [itemFilter, setItemFilter] = useState('all'); // 'all', 'added', 'increased', 'decreased'
   const [viewMode, setViewMode] = useState('dashboard'); // 'dashboard', 'brand-history', 'items-history', 'all-history'
+  const [dateOptions] = useState(generateDateOptions());
 
   useEffect(() => {
     checkBaseline();
@@ -828,14 +851,18 @@ const Dashboard = () => {
               <p className="text-gray-400 text-sm">
                 Upload your first scrape files to start tracking price changes
               </p>
-              <Input
-                type="text"
-                placeholder="e.g., 10-Mar-25"
-                value={scrapeDate}
-                onChange={(e) => setScrapeDate(e.target.value)}
-                className="bg-[#0b0b0f] border-[#1a1a1f] text-white placeholder:text-gray-500"
-                data-testid="scrape-date-input"
-              />
+              <Select value={scrapeDate} onValueChange={setScrapeDate}>
+                <SelectTrigger className="bg-[#0b0b0f] border-[#1a1a1f] text-white" data-testid="scrape-date-select">
+                  <SelectValue placeholder="Select date (e.g., 10-Mar-26)" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#0b0b0f] border-[#1a1a1f] text-white max-h-[300px]">
+                  {dateOptions.map((date) => (
+                    <SelectItem key={date} value={date} className="text-white hover:bg-green-400/10">
+                      {date}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Input
                 type="file"
                 accept=".xlsx,.xls"
@@ -1161,14 +1188,18 @@ const Dashboard = () => {
               <div className="bg-[#0b0b0f] border border-[#1a1a1f] rounded-lg p-4 space-y-3">
                 <h3 className="text-white font-semibold">Upload Scrape Data</h3>
                 <p className="text-gray-400 text-sm">Upload scrape files for a specific date</p>
-                <Input
-                  type="text"
-                  placeholder="e.g., 10-Mar-25"
-                  value={scrapeDate}
-                  onChange={(e) => setScrapeDate(e.target.value)}
-                  className="bg-[#101014] border-[#1a1a1f] text-white placeholder:text-gray-500"
-                  data-testid="modal-scrape-date-input"
-                />
+                <Select value={scrapeDate} onValueChange={setScrapeDate}>
+                  <SelectTrigger className="bg-[#101014] border-[#1a1a1f] text-white" data-testid="modal-scrape-date-select">
+                    <SelectValue placeholder="Select date (e.g., 10-Mar-26)" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#0b0b0f] border-[#1a1a1f] text-white max-h-[300px]">
+                    {dateOptions.map((date) => (
+                      <SelectItem key={date} value={date} className="text-white hover:bg-green-400/10">
+                        {date}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Input
                   type="file"
                   accept=".xlsx,.xls"

@@ -106,6 +106,14 @@ def compare_items(baseline_items: Dict[str, float], scrape_items: Dict[str, floa
     
     return stats
 
+def parse_date_for_sorting(date_str: str) -> datetime:
+    """Parse date string like '6-Mar-26' or '24-Feb-26' to datetime for sorting"""
+    try:
+        return datetime.strptime(date_str, "%d-%b-%y")
+    except:
+        # Fallback for unexpected formats
+        return datetime.now(timezone.utc)
+
 # Routes
 @api_router.get("/")
 async def root():
@@ -401,7 +409,7 @@ async def get_all_history():
         
         # Calculate summary for each date (own brands only)
         dates_summary = []
-        for date in sorted(dates_data.keys()):  # Chronological order
+        for date in sorted(dates_data.keys(), key=parse_date_for_sorting):  # Chronological order with proper date parsing
             own_data = dates_data[date]["own_brands_only"]
             
             total_price_up = sum(b["price_up"] for b in own_data.values())
@@ -429,6 +437,43 @@ async def get_all_history():
             "latest_date": latest_date,
             "total_brands": len(set(brand for date_data in dates_data.values() for brand in date_data["brands"].keys())),
             "own_brands_count": len(own_brands)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/fix-dates")
+async def fix_dates():
+    """Fix date formats in database"""
+    try:
+        # Map old dates to new dates
+        date_mapping = {
+            "11 mar": "11-Mar-26",
+            "6 Mar": "6-Mar-26",
+            "9 Mar": "9-Mar-26"
+        }
+        
+        # Update scrapes collection
+        for old_date, new_date in date_mapping.items():
+            result = await db.scrapes.update_many(
+                {"scrape_date": old_date},
+                {"$set": {"scrape_date": new_date}}
+            )
+            print(f"Updated {result.modified_count} scrapes from '{old_date}' to '{new_date}'")
+        
+        # Update baseline date
+        baseline_result = await db.baseline.update_many(
+            {"baseline_date": "24-Feb-25"},
+            {"$set": {"baseline_date": "24-Feb-26"}}
+        )
+        print(f"Updated {baseline_result.modified_count} baseline records")
+        
+        return {
+            "success": True,
+            "message": "Dates updated successfully",
+            "updates": {
+                "scrapes": sum(1 for _ in date_mapping),
+                "baseline": baseline_result.modified_count
+            }
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
