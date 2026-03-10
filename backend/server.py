@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -6,10 +6,8 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List
-import uuid
+from typing import List, Dict, Optional, Any
 from datetime import datetime, timezone
-
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -25,46 +23,345 @@ app = FastAPI()
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
+# Models
+class BaselineData(BaseModel):
+    brand_name: str
+    items: Dict[str, float]
+    baseline_date: str = "24-Feb-25"
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
+class BaselineUpload(BaseModel):
+    brands: Dict[str, Dict[str, float]]
+    baseline_date: str = "24-Feb-25"
+
+class ComparisonStats(BaseModel):
+    price_up: int = 0
+    price_down: int = 0
+    new_items: int = 0
+    removed: int = 0
+    no_change: int = 0
+    total: int = 0
+    change_percent: float = 0.0
+
+class DailyScrape(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    scrape_date: str
+    brand_name: str
+    items: Dict[str, float]
+    vs_baseline: ComparisonStats
+    vs_previous: Optional[ComparisonStats] = None
+    uploaded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
+class ScrapeUpload(BaseModel):
+    scrape_date: str
+    brands: Dict[str, Dict[str, float]]
 
-# Add your routes to the router instead of directly to app
+class BrandHistoryItem(BaseModel):
+    date: str
+    price_up: int
+    price_down: int
+    new_items: int
+    removed: int
+    no_change: int
+    total: int
+    change_percent: float
+
+class ItemPriceHistory(BaseModel):
+    item_name: str
+    brand_name: str
+    baseline_price: Optional[float]
+    history: List[Dict[str, Any]]
+
+# Helper functions
+def compare_items(baseline_items: Dict[str, float], scrape_items: Dict[str, float]) -> ComparisonStats:
+    stats = ComparisonStats()
+    
+    baseline_keys = set(baseline_items.keys())
+    scrape_keys = set(scrape_items.keys())
+    
+    # Check items in scrape
+    for item_name in scrape_keys:
+        scrape_price = scrape_items[item_name]
+        baseline_price = baseline_items.get(item_name)
+        
+        if baseline_price is None:
+            stats.new_items += 1
+        else:
+            if scrape_price > baseline_price:
+                stats.price_up += 1
+            elif scrape_price < baseline_price:
+                stats.price_down += 1
+            else:
+                stats.no_change += 1
+    
+    # Check removed items
+    for item_name in baseline_keys:
+        if item_name not in scrape_keys:
+            stats.removed += 1
+    
+    stats.total = len(scrape_keys)
+    if stats.total > 0:
+        stats.change_percent = ((stats.price_up + stats.price_down) / stats.total) * 100
+    
+    return stats
+
+# Routes
 @api_router.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"message": "Menu Price Tracker API"}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
+@api_router.post("/baseline")
+async def upload_baseline(data: BaselineUpload):
+    """Upload or update baseline data"""
+    try:
+        # Clear existing baseline
+        await db.baseline.delete_many({})
+        
+        # Insert new baseline data
+        baseline_docs = []
+        for brand_name, items in data.brands.items():
+            baseline_docs.append({
+                "brand_name": brand_name,
+                "items": items,
+                "baseline_date": data.baseline_date,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            })
+        
+        if baseline_docs:
+            await db.baseline.insert_many(baseline_docs)
+        
+        return {
+            "success": True,
+            "brands_count": len(baseline_docs),
+            "items_count": sum(len(items) for items in data.brands.values())
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
+@api_router.get("/baseline")
+async def get_baseline():
+    """Get current baseline data"""
+    try:
+        baseline_docs = await db.baseline.find({}, {"_id": 0}).to_list(1000)
+        
+        if not baseline_docs:
+            return {"exists": False, "brands": {}}
+        
+        brands = {}
+        baseline_date = baseline_docs[0].get("baseline_date", "24-Feb-25")
+        
+        for doc in baseline_docs:
+            brands[doc["brand_name"]] = doc["items"]
+        
+        return {
+            "exists": True,
+            "baseline_date": baseline_date,
+            "brands": brands,
+            "brands_count": len(brands)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/scrape")
+async def upload_scrape(data: ScrapeUpload):
+    """Upload daily scrape data and calculate comparisons"""
+    try:
+        # Get baseline data
+        baseline_docs = await db.baseline.find({}, {"_id": 0}).to_list(1000)
+        if not baseline_docs:
+            raise HTTPException(status_code=400, detail="Baseline data not found. Please upload master file first.")
+        
+        baseline = {doc["brand_name"]: doc["items"] for doc in baseline_docs}
+        
+        # Get previous scrape (most recent before this date)
+        previous_scrapes = await db.scrapes.find(
+            {"scrape_date": {"$ne": data.scrape_date}},
+            {"_id": 0}
+        ).sort("uploaded_at", -1).limit(100).to_list(100)
+        
+        previous_by_brand = {}
+        if previous_scrapes:
+            # Group by brand and get the most recent for each
+            for scrape in previous_scrapes:
+                brand = scrape["brand_name"]
+                if brand not in previous_by_brand:
+                    previous_by_brand[brand] = scrape["items"]
+        
+        # Delete existing scrapes for this date
+        await db.scrapes.delete_many({"scrape_date": data.scrape_date})
+        
+        # Process and store scrapes
+        scrape_docs = []
+        for brand_name, items in data.brands.items():
+            baseline_items = baseline.get(brand_name, {})
+            previous_items = previous_by_brand.get(brand_name, {})
+            
+            vs_baseline = compare_items(baseline_items, items)
+            vs_previous = compare_items(previous_items, items) if previous_items else None
+            
+            scrape_doc = {
+                "scrape_date": data.scrape_date,
+                "brand_name": brand_name,
+                "items": items,
+                "vs_baseline": vs_baseline.model_dump(),
+                "vs_previous": vs_previous.model_dump() if vs_previous else None,
+                "uploaded_at": datetime.now(timezone.utc).isoformat()
+            }
+            scrape_docs.append(scrape_doc)
+        
+        if scrape_docs:
+            await db.scrapes.insert_many(scrape_docs)
+        
+        return {
+            "success": True,
+            "scrape_date": data.scrape_date,
+            "brands_count": len(scrape_docs)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/dashboard")
+async def get_dashboard():
+    """Get dashboard summary with all historical data"""
+    try:
+        # Get all scrapes
+        all_scrapes = await db.scrapes.find({}, {"_id": 0}).to_list(10000)
+        
+        if not all_scrapes:
+            return {
+                "has_data": False,
+                "latest_date": None,
+                "previous_date": None,
+                "brands": []
+            }
+        
+        # Group by brand and date
+        brands_data = {}
+        dates = set()
+        
+        for scrape in all_scrapes:
+            brand = scrape["brand_name"]
+            date = scrape["scrape_date"]
+            dates.add(date)
+            
+            if brand not in brands_data:
+                brands_data[brand] = {}
+            
+            brands_data[brand][date] = {
+                "items": scrape["items"],
+                "vs_baseline": scrape["vs_baseline"],
+                "vs_previous": scrape.get("vs_previous")
+            }
+        
+        # Sort dates
+        sorted_dates = sorted(dates, reverse=True)
+        latest_date = sorted_dates[0] if sorted_dates else None
+        previous_date = sorted_dates[1] if len(sorted_dates) > 1 else None
+        
+        # Build response
+        brands_list = []
+        for brand_name, date_data in brands_data.items():
+            latest_data = date_data.get(latest_date, {})
+            
+            brands_list.append({
+                "brand_name": brand_name,
+                "latest_data": latest_data,
+                "all_dates": list(date_data.keys())
+            })
+        
+        return {
+            "has_data": True,
+            "latest_date": latest_date,
+            "previous_date": previous_date,
+            "all_dates": sorted_dates,
+            "brands": brands_list
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/brand-history/{brand_name}")
+async def get_brand_history(brand_name: str):
+    """Get day-wise history for a specific brand"""
+    try:
+        scrapes = await db.scrapes.find(
+            {"brand_name": brand_name},
+            {"_id": 0}
+        ).sort("scrape_date", 1).to_list(1000)
+        
+        history = []
+        for scrape in scrapes:
+            vs_baseline = scrape["vs_baseline"]
+            history.append({
+                "date": scrape["scrape_date"],
+                "price_up": vs_baseline["price_up"],
+                "price_down": vs_baseline["price_down"],
+                "new_items": vs_baseline["new_items"],
+                "removed": vs_baseline["removed"],
+                "no_change": vs_baseline["no_change"],
+                "total": vs_baseline["total"],
+                "change_percent": vs_baseline["change_percent"]
+            })
+        
+        return {
+            "brand_name": brand_name,
+            "history": history
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/items/{brand_name}")
+async def get_items_history(brand_name: str):
+    """Get item-wise price history for a brand"""
+    try:
+        # Get baseline
+        baseline_doc = await db.baseline.find_one(
+            {"brand_name": brand_name},
+            {"_id": 0}
+        )
+        
+        baseline_items = baseline_doc["items"] if baseline_doc else {}
+        baseline_date = baseline_doc.get("baseline_date", "24-Feb-25") if baseline_doc else "24-Feb-25"
+        
+        # Get all scrapes for this brand
+        scrapes = await db.scrapes.find(
+            {"brand_name": brand_name},
+            {"_id": 0}
+        ).sort("scrape_date", 1).to_list(1000)
+        
+        # Build item history
+        all_items = set(baseline_items.keys())
+        for scrape in scrapes:
+            all_items.update(scrape["items"].keys())
+        
+        items_history = []
+        for item_name in sorted(all_items):
+            baseline_price = baseline_items.get(item_name)
+            
+            price_history = [{"date": baseline_date, "price": baseline_price}]
+            
+            for scrape in scrapes:
+                price = scrape["items"].get(item_name)
+                price_history.append({
+                    "date": scrape["scrape_date"],
+                    "price": price
+                })
+            
+            items_history.append({
+                "item_name": item_name,
+                "baseline_price": baseline_price,
+                "history": price_history
+            })
+        
+        return {
+            "brand_name": brand_name,
+            "baseline_date": baseline_date,
+            "items": items_history
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Include the router in the main app
 app.include_router(api_router)

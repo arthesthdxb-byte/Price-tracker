@@ -1,9 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, RefreshCw, Download, AlertTriangle } from 'lucide-react';
+import { Upload, RefreshCw, Download, AlertTriangle, X, TrendingUp, TrendingDown } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { toast } from 'sonner';
+import axios from 'axios';
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const API = `${BACKEND_URL}/api`;
 
 const BRAND_GROUPS = [
   { own: 'Operational Falafel', competitors: ['Zaatar w Zeit', 'Aloo Beirut'] },
@@ -24,731 +28,901 @@ const BRAND_GROUPS = [
 const ALL_BRANDS = BRAND_GROUPS.flatMap(g => [g.own, ...g.competitors]);
 
 const Dashboard = () => {
-  const [baselineData, setBaselineData] = useState(null);
+  const [hasBaseline, setHasBaseline] = useState(false);
+  const [baselineDate, setBaselineDate] = useState('24-Feb-25');
+  const [dashboardData, setDashboardData] = useState(null);
   const [scrapeDate, setScrapeDate] = useState('');
-  const [comparisonResults, setComparisonResults] = useState(null);
-  const [warnings, setWarnings] = useState([]);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [selectedBrand, setSelectedBrand] = useState(null);
+  const [brandHistory, setBrandHistory] = useState(null);
+  const [itemsHistory, setItemsHistory] = useState(null);
+  const [viewMode, setViewMode] = useState('dashboard'); // 'dashboard', 'brand-history', 'items-history'
 
-  // Parse Master File (Baseline)
-  const handleMasterUpload = (e) => {
+  useEffect(() => {
+    checkBaseline();
+    loadDashboard();
+  }, []);
+
+  const checkBaseline = async () => {
+    try {
+      const response = await axios.get(`${API}/baseline`);
+      setHasBaseline(response.data.exists);
+      if (response.data.baseline_date) {
+        setBaselineDate(response.data.baseline_date);
+      }
+    } catch (error) {
+      console.error('Error checking baseline:', error);
+    }
+  };
+
+  const loadDashboard = async () => {
+    try {
+      const response = await axios.get(`${API}/dashboard`);
+      if (response.data.has_data) {
+        setDashboardData(response.data);
+      }
+    } catch (error) {
+      console.error('Error loading dashboard:', error);
+    }
+  };
+
+  const parseExcelFile = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const data = new Uint8Array(evt.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+
+          const brands = {};
+          const skipKeywords = [
+            'Executive Summary',
+            'Price History',
+            'Trend Data',
+            'Price Increases',
+            'Price Decreases',
+          ];
+
+          workbook.SheetNames.forEach((sheetName) => {
+            const shouldSkip = skipKeywords.some((keyword) =>
+              sheetName.includes(keyword)
+            );
+            if (shouldSkip) return;
+
+            const sheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+            const items = {};
+            for (let i = 5; i < Math.min(605, jsonData.length); i++) {
+              const row = jsonData[i];
+              if (!row) continue;
+
+              const itemName = row[6];
+              const price = row[7];
+
+              if (itemName && price !== undefined && price !== null && price !== '') {
+                const trimmedName = String(itemName).trim();
+                const parsedPrice = parseFloat(price);
+                if (trimmedName && !isNaN(parsedPrice)) {
+                  items[trimmedName] = parsedPrice;
+                }
+              }
+            }
+
+            if (Object.keys(items).length > 0) {
+              brands[sheetName] = items;
+            }
+          });
+
+          resolve(brands);
+        } catch (error) {
+          reject(error);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  };
+
+  const parseScrapeFiles = (files) => {
+    return new Promise((resolve, reject) => {
+      const brands = {};
+      let filesProcessed = 0;
+
+      const processFile = (file) => {
+        return new Promise((resolveFile) => {
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            try {
+              const data = new Uint8Array(evt.target.result);
+              const workbook = XLSX.read(data, { type: 'array' });
+
+              workbook.SheetNames.forEach((sheetName) => {
+                const sheet = workbook.Sheets[sheetName];
+                const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+                const items = {};
+                for (let i = 1; i < jsonData.length; i++) {
+                  const row = jsonData[i];
+                  if (!row) continue;
+
+                  const itemName = row[1];
+                  const price = row[2];
+
+                  if (itemName && price !== undefined && price !== null && price !== '') {
+                    const trimmedName = String(itemName).trim();
+                    const parsedPrice = parseFloat(price);
+                    if (trimmedName && !isNaN(parsedPrice)) {
+                      items[trimmedName] = parsedPrice;
+                    }
+                  }
+                }
+
+                if (Object.keys(items).length > 0) {
+                  brands[sheetName] = items;
+                }
+              });
+              resolveFile();
+            } catch (error) {
+              console.error('Error parsing scrape file:', error);
+              resolveFile();
+            }
+          };
+          reader.readAsArrayBuffer(file);
+        });
+      };
+
+      const promises = [];
+      for (let i = 0; i < files.length; i++) {
+        promises.push(processFile(files[i]));
+      }
+
+      Promise.all(promises).then(() => {
+        resolve(brands);
+      });
+    });
+  };
+
+  const handleMasterUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
+    try {
+      const brands = await parseExcelFile(file);
+      
+      const response = await axios.post(`${API}/baseline`, {
+        brands,
+        baseline_date: baselineDate
+      });
 
-        const baseline = {};
-        let totalBrands = 0;
-        let totalItems = 0;
-
-        const skipKeywords = [
-          'Executive Summary',
-          'Price History',
-          'Trend Data',
-          'Price Increases',
-          'Price Decreases',
-        ];
-
-        workbook.SheetNames.forEach((sheetName) => {
-          // Skip sheets containing specific keywords
-          const shouldSkip = skipKeywords.some((keyword) =>
-            sheetName.includes(keyword)
-          );
-          if (shouldSkip) return;
-
-          const sheet = workbook.Sheets[sheetName];
-          const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-
-          // Read columns G (index 6) and H (index 7) from rows 6-605
-          const items = {};
-          for (let i = 5; i < Math.min(605, jsonData.length); i++) {
-            const row = jsonData[i];
-            if (!row) continue;
-
-            const itemName = row[6]; // Column G
-            const price = row[7]; // Column H
-
-            if (itemName && price !== undefined && price !== null && price !== '') {
-              const trimmedName = String(itemName).trim();
-              const parsedPrice = parseFloat(price);
-              if (trimmedName && !isNaN(parsedPrice)) {
-                items[trimmedName] = parsedPrice;
-                totalItems++;
-              }
-            }
-          }
-
-          if (Object.keys(items).length > 0) {
-            baseline[sheetName] = items;
-            totalBrands++;
-          }
-        });
-
-        setBaselineData(baseline);
-        toast.success(`✓ Master loaded — ${totalBrands} brands, ${totalItems} baseline items`);
-      } catch (error) {
-        console.error('Error parsing master file:', error);
-        toast.error('Error parsing master file. Please check the file format.');
+      if (response.data.success) {
+        toast.success(`✓ Master uploaded — ${response.data.brands_count} brands, ${response.data.items_count} items`);
+        setHasBaseline(true);
+        setShowUploadModal(false);
       }
-    };
-    reader.readAsArrayBuffer(file);
+    } catch (error) {
+      console.error('Error uploading master:', error);
+      toast.error('Error uploading master file');
+    }
   };
 
-  // Parse Scrape Files
-  const handleScrapeUpload = (e) => {
+  const handleScrapeUpload = async (e) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    if (!baselineData) {
-      toast.error('Please upload the Master file first');
-      return;
-    }
     if (!scrapeDate) {
       toast.error('Please enter the scrape date');
       return;
     }
 
-    const scrapeData = {};
-    let filesProcessed = 0;
-
-    const processFile = (file) => {
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-          try {
-            const data = new Uint8Array(evt.target.result);
-            const workbook = XLSX.read(data, { type: 'array' });
-
-            workbook.SheetNames.forEach((sheetName) => {
-              const sheet = workbook.Sheets[sheetName];
-              const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-
-              // Row 1 = headers, Row 2+ = data
-              // Column A = Category, Column B = Item Name, Column C = Price
-              const items = {};
-              for (let i = 1; i < jsonData.length; i++) {
-                const row = jsonData[i];
-                if (!row) continue;
-
-                const itemName = row[1]; // Column B
-                const price = row[2]; // Column C
-
-                if (itemName && price !== undefined && price !== null && price !== '') {
-                  const trimmedName = String(itemName).trim();
-                  const parsedPrice = parseFloat(price);
-                  if (trimmedName && !isNaN(parsedPrice)) {
-                    items[trimmedName] = parsedPrice;
-                  }
-                }
-              }
-
-              if (Object.keys(items).length > 0) {
-                scrapeData[sheetName] = items;
-              }
-            });
-            resolve();
-          } catch (error) {
-            console.error('Error parsing scrape file:', error);
-            resolve();
-          }
-        };
-        reader.readAsArrayBuffer(file);
+    try {
+      const brands = await parseScrapeFiles(files);
+      
+      const response = await axios.post(`${API}/scrape`, {
+        scrape_date: scrapeDate,
+        brands
       });
-    };
 
-    const promises = [];
-    for (let i = 0; i < files.length; i++) {
-      promises.push(processFile(files[i]));
-    }
-
-    Promise.all(promises).then(() => {
-      // Compare scrape vs baseline
-      const results = compareData(baselineData, scrapeData);
-      setComparisonResults(results);
-      toast.success(`✓ Comparison complete — ${Object.keys(scrapeData).length} brands analyzed`);
-    });
-  };
-
-  const compareData = (baseline, scrape) => {
-    const brandResults = {};
-    const newWarnings = [];
-
-    // Check each brand in BRAND_GROUPS
-    ALL_BRANDS.forEach((brandName) => {
-      const baselineItems = baseline[brandName] || {};
-      const scrapeItems = scrape[brandName] || {};
-
-      const baselineKeys = Object.keys(baselineItems);
-      const scrapeKeys = Object.keys(scrapeItems);
-
-      if (scrapeKeys.length === 0 && baselineKeys.length > 0) {
-        newWarnings.push(`⚠️ ${brandName}: Missing in scrape files`);
+      if (response.data.success) {
+        toast.success(`✓ Scrape uploaded — ${response.data.brands_count} brands analyzed`);
+        await loadDashboard();
+        setScrapeDate('');
       }
-
-      let priceUp = 0;
-      let priceDown = 0;
-      let newItems = 0;
-      let removed = 0;
-      let noChange = 0;
-
-      // Check items in scrape
-      scrapeKeys.forEach((itemName) => {
-        const scrapePrice = scrapeItems[itemName];
-        const baselinePrice = baselineItems[itemName];
-
-        if (baselinePrice === undefined) {
-          newItems++;
-        } else {
-          if (scrapePrice > baselinePrice) {
-            priceUp++;
-          } else if (scrapePrice < baselinePrice) {
-            priceDown++;
-          } else {
-            noChange++;
-          }
-        }
-      });
-
-      // Check removed items (in baseline but not in scrape)
-      baselineKeys.forEach((itemName) => {
-        if (scrapeItems[itemName] === undefined) {
-          removed++;
-        }
-      });
-
-      const total = scrapeKeys.length;
-      const changePercent = total > 0 ? ((priceUp + priceDown) / total) * 100 : 0;
-
-      brandResults[brandName] = {
-        priceUp,
-        priceDown,
-        newItems,
-        removed,
-        noChange,
-        total,
-        changePercent,
-      };
-    });
-
-    setWarnings(newWarnings);
-    return brandResults;
+    } catch (error) {
+      console.error('Error uploading scrape:', error);
+      toast.error(error.response?.data?.detail || 'Error uploading scrape files');
+    }
   };
 
-  const calculateTotals = (results, ownBrandsOnly = false) => {
-    const ownBrands = BRAND_GROUPS.map((g) => g.own);
-    const totals = {
-      priceUp: 0,
-      priceDown: 0,
-      newItems: 0,
-      removed: 0,
-      noChange: 0,
-      total: 0,
-    };
+  const viewBrandHistory = async (brandName) => {
+    try {
+      const response = await axios.get(`${API}/brand-history/${encodeURIComponent(brandName)}`);
+      setBrandHistory(response.data);
+      setSelectedBrand(brandName);
+      setViewMode('brand-history');
+    } catch (error) {
+      console.error('Error loading brand history:', error);
+      toast.error('Error loading brand history');
+    }
+  };
 
-    Object.keys(results).forEach((brand) => {
-      if (ownBrandsOnly && !ownBrands.includes(brand)) return;
-      const data = results[brand];
-      totals.priceUp += data.priceUp;
-      totals.priceDown += data.priceDown;
-      totals.newItems += data.newItems;
-      totals.removed += data.removed;
-      totals.noChange += data.noChange;
-      totals.total += data.total;
-    });
-
-    return totals;
+  const viewItemsHistory = async (brandName) => {
+    try {
+      const response = await axios.get(`${API}/items/${encodeURIComponent(brandName)}`);
+      setItemsHistory(response.data);
+      setSelectedBrand(brandName);
+      setViewMode('items-history');
+    } catch (error) {
+      console.error('Error loading items history:', error);
+      toast.error('Error loading items history');
+    }
   };
 
   const exportResults = () => {
-    if (!comparisonResults) return;
+    if (!dashboardData) return;
 
     const exportData = [];
     exportData.push(['Brand', 'Type', 'Price Up', 'Price Down', 'New Items', 'Removed', 'No Change', 'Total', 'Change %']);
 
     BRAND_GROUPS.forEach((group) => {
-      const ownData = comparisonResults[group.own] || {};
-      exportData.push([
-        group.own,
-        'OWN',
-        ownData.priceUp || 0,
-        ownData.priceDown || 0,
-        ownData.newItems || 0,
-        ownData.removed || 0,
-        ownData.noChange || 0,
-        ownData.total || 0,
-        ownData.changePercent ? ownData.changePercent.toFixed(1) + '%' : '0%',
-      ]);
+      const ownBrand = dashboardData.brands.find(b => b.brand_name === group.own);
+      if (ownBrand) {
+        const data = ownBrand.latest_data.vs_baseline || {};
+        exportData.push([
+          group.own,
+          'OWN',
+          data.price_up || 0,
+          data.price_down || 0,
+          data.new_items || 0,
+          data.removed || 0,
+          data.no_change || 0,
+          data.total || 0,
+          data.change_percent ? data.change_percent.toFixed(1) + '%' : '0%',
+        ]);
+      }
 
       group.competitors.forEach((comp) => {
-        const compData = comparisonResults[comp] || {};
-        exportData.push([
-          comp,
-          'COMP',
-          compData.priceUp || 0,
-          compData.priceDown || 0,
-          compData.newItems || 0,
-          compData.removed || 0,
-          compData.noChange || 0,
-          compData.total || 0,
-          compData.changePercent ? compData.changePercent.toFixed(1) + '%' : '0%',
-        ]);
+        const compBrand = dashboardData.brands.find(b => b.brand_name === comp);
+        if (compBrand) {
+          const data = compBrand.latest_data.vs_baseline || {};
+          exportData.push([
+            comp,
+            'COMP',
+            data.price_up || 0,
+            data.price_down || 0,
+            data.new_items || 0,
+            data.removed || 0,
+            data.no_change || 0,
+            data.total || 0,
+            data.change_percent ? data.change_percent.toFixed(1) + '%' : '0%',
+          ]);
+        }
       });
     });
 
     const ws = XLSX.utils.aoa_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Comparison Results');
-    XLSX.writeFile(wb, `Menu_Price_Tracker_${scrapeDate.replace(/[^a-zA-Z0-9]/g, '_')}.xlsx`);
+    XLSX.writeFile(wb, `Menu_Price_Tracker_${dashboardData.latest_date.replace(/[^a-zA-Z0-9]/g, '_')}.xlsx`);
     toast.success('✓ Results exported successfully');
   };
 
-  const resetUpload = () => {
-    setBaselineData(null);
-    setScrapeDate('');
-    setComparisonResults(null);
-    setWarnings([]);
+  const calculateOwnBrandsTotals = (type = 'vs_baseline') => {
+    if (!dashboardData) return { price_up: 0, price_down: 0, new_items: 0, removed: 0, no_change: 0, total: 0 };
+
+    const ownBrands = BRAND_GROUPS.map(g => g.own);
+    const totals = { price_up: 0, price_down: 0, new_items: 0, removed: 0, no_change: 0, total: 0 };
+
+    dashboardData.brands.forEach(brand => {
+      if (ownBrands.includes(brand.brand_name)) {
+        const data = brand.latest_data[type] || {};
+        totals.price_up += data.price_up || 0;
+        totals.price_down += data.price_down || 0;
+        totals.new_items += data.new_items || 0;
+        totals.removed += data.removed || 0;
+        totals.no_change += data.no_change || 0;
+        totals.total += data.total || 0;
+      }
+    });
+
+    return totals;
   };
 
-  const renderUploadSection = () => (
-    <div className="min-h-screen flex items-center justify-center p-6" data-testid="upload-section">
-      <div className="w-full max-w-2xl space-y-6">
-        {/* Logo/Title */}
-        <div className="text-center space-y-2">
-          <h1 className="text-5xl font-bold text-green-400" data-testid="app-title">📊 MENU PRICE TRACKER</h1>
-          <p className="text-gray-400 text-lg" data-testid="app-subtitle">Talabat UAE · Competitive Pricing Intelligence</p>
-        </div>
-
-        {/* Step 1: Master File */}
-        <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-6 space-y-4" data-testid="master-upload-card">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-green-400/10 flex items-center justify-center text-green-400 font-bold" data-testid="step-1-badge">
-              1
+  if (viewMode === 'brand-history' && brandHistory) {
+    return (
+      <div className="min-h-screen bg-[#0b0b0f] p-6">
+        <div className="max-w-6xl mx-auto">
+          <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-6 mb-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-bold text-white mb-1" data-testid="brand-history-title">{selectedBrand}</h1>
+                <p className="text-gray-400 text-sm">Day-wise Price Change History</p>
+              </div>
+              <div className="flex gap-3">
+                <Button
+                  onClick={() => viewItemsHistory(selectedBrand)}
+                  variant="outline"
+                  className="bg-[#0b0b0f] border-[#1a1a1f] text-cyan-400 hover:bg-cyan-400/10"
+                  data-testid="view-items-button"
+                >
+                  View Items
+                </Button>
+                <Button
+                  onClick={() => setViewMode('dashboard')}
+                  variant="outline"
+                  className="bg-[#0b0b0f] border-[#1a1a1f] text-white hover:bg-white/10"
+                  data-testid="back-to-dashboard-button"
+                >
+                  <X className="w-4 h-4 mr-2" />
+                  Back
+                </Button>
+              </div>
             </div>
-            <h2 className="text-xl font-semibold text-white" data-testid="step-1-title">Upload Master File</h2>
           </div>
-          <p className="text-gray-400 text-sm" data-testid="step-1-description">
-            Upload the Master_Price_Tracker_v3.xlsx file containing baseline data (24-Feb-25)
-          </p>
-          <div className="relative">
-            <Input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={handleMasterUpload}
-              className="bg-[#0b0b0f] border-[#1a1a1f] text-white cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-green-400/10 file:text-green-400 file:font-medium hover:file:bg-green-400/20"
-              data-testid="master-file-input"
-            />
+
+          <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-[#0b0b0f] border-b border-[#1a1a1f]">
+                    <th className="text-left p-4 text-gray-400 font-semibold text-sm">DATE</th>
+                    <th className="text-center p-4 text-gray-400 font-semibold text-sm">▲ UP</th>
+                    <th className="text-center p-4 text-gray-400 font-semibold text-sm">▼ DOWN</th>
+                    <th className="text-center p-4 text-gray-400 font-semibold text-sm">🟢 NEW</th>
+                    <th className="text-center p-4 text-gray-400 font-semibold text-sm">🔴 REM</th>
+                    <th className="text-center p-4 text-gray-400 font-semibold text-sm">✅ NC</th>
+                    <th className="text-center p-4 text-gray-400 font-semibold text-sm">TOTAL</th>
+                    <th className="text-center p-4 text-gray-400 font-semibold text-sm">CHG%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {brandHistory.history.map((item, idx) => (
+                    <tr key={idx} className="border-b border-[#1a1a1f] hover:bg-white/5" data-testid={`history-row-${idx}`}>
+                      <td className="p-4 text-white font-semibold">{item.date}</td>
+                      <td className="text-center p-4">
+                        {item.price_up > 0 ? (
+                          <span className="inline-block px-3 py-1 rounded-full bg-green-400/20 text-green-400 text-sm font-semibold">
+                            {item.price_up}
+                          </span>
+                        ) : (
+                          <span className="text-gray-600">—</span>
+                        )}
+                      </td>
+                      <td className="text-center p-4">
+                        {item.price_down > 0 ? (
+                          <span className="inline-block px-3 py-1 rounded-full bg-red-400/20 text-red-400 text-sm font-semibold">
+                            {item.price_down}
+                          </span>
+                        ) : (
+                          <span className="text-gray-600">—</span>
+                        )}
+                      </td>
+                      <td className="text-center p-4">
+                        {item.new_items > 0 ? (
+                          <span className="inline-block px-3 py-1 rounded-full bg-cyan-400/20 text-cyan-400 text-sm font-semibold">
+                            {item.new_items}
+                          </span>
+                        ) : (
+                          <span className="text-gray-600">—</span>
+                        )}
+                      </td>
+                      <td className="text-center p-4">
+                        {item.removed > 0 ? (
+                          <span className="inline-block px-3 py-1 rounded-full bg-purple-400/20 text-purple-400 text-sm font-semibold">
+                            {item.removed}
+                          </span>
+                        ) : (
+                          <span className="text-gray-600">—</span>
+                        )}
+                      </td>
+                      <td className="text-center p-4">
+                        {item.no_change > 0 ? (
+                          <span className="inline-block px-3 py-1 rounded-full bg-gray-400/20 text-gray-400 text-sm font-semibold">
+                            {item.no_change}
+                          </span>
+                        ) : (
+                          <span className="text-gray-600">—</span>
+                        )}
+                      </td>
+                      <td className="text-center p-4">
+                        <span className="text-blue-400 font-semibold">{item.total}</span>
+                      </td>
+                      <td className="text-center p-4">
+                        <span
+                          className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${
+                            item.change_percent > 50
+                              ? 'bg-red-400/20 text-red-400'
+                              : item.change_percent > 20
+                              ? 'bg-yellow-400/20 text-yellow-400'
+                              : 'bg-green-400/20 text-green-400'
+                          }`}
+                        >
+                          {item.change_percent.toFixed(1)}%
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-          {baselineData && (
-            <div className="flex items-center gap-2 text-green-400 text-sm" data-testid="master-success-message">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-              Master loaded — {Object.keys(baselineData).length} brands
+        </div>
+      </div>
+    );
+  }
+
+  if (viewMode === 'items-history' && itemsHistory) {
+    return (
+      <div className="min-h-screen bg-[#0b0b0f] p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-6 mb-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-bold text-white mb-1" data-testid="items-history-title">{selectedBrand}</h1>
+                <p className="text-gray-400 text-sm">Item-wise Price History · Baseline: {itemsHistory.baseline_date}</p>
+              </div>
+              <Button
+                onClick={() => setViewMode('dashboard')}
+                variant="outline"
+                className="bg-[#0b0b0f] border-[#1a1a1f] text-white hover:bg-white/10"
+                data-testid="back-button"
+              >
+                <X className="w-4 h-4 mr-2" />
+                Back
+              </Button>
+            </div>
+          </div>
+
+          <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-[#0b0b0f] border-b border-[#1a1a1f]">
+                    <th className="text-left p-4 text-gray-400 font-semibold text-sm sticky left-0 bg-[#0b0b0f] z-10">ITEM NAME</th>
+                    <th className="text-center p-4 text-gray-400 font-semibold text-sm">BASELINE</th>
+                    {itemsHistory.items[0]?.history.slice(1).map((h, idx) => (
+                      <th key={idx} className="text-center p-4 text-gray-400 font-semibold text-sm whitespace-nowrap">{h.date}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {itemsHistory.items.map((item, idx) => {
+                    const hasChanges = item.history.some((h, i) => {
+                      if (i === 0) return false;
+                      const prevPrice = item.baseline_price;
+                      return h.price !== prevPrice && h.price !== null;
+                    });
+
+                    return (
+                      <tr key={idx} className="border-b border-[#1a1a1f] hover:bg-white/5" data-testid={`item-row-${idx}`}>
+                        <td className="p-4 text-white sticky left-0 bg-[#101014] z-10">
+                          <div className="flex items-center gap-2">
+                            {hasChanges && (
+                              <TrendingUp className="w-4 h-4 text-yellow-400" />
+                            )}
+                            {item.item_name}
+                          </div>
+                        </td>
+                        <td className="text-center p-4 text-gray-300">
+                          {item.baseline_price !== null && item.baseline_price !== undefined
+                            ? `AED ${item.baseline_price.toFixed(2)}`
+                            : '—'}
+                        </td>
+                        {item.history.slice(1).map((h, hidx) => {
+                          const baseline = item.baseline_price;
+                          const current = h.price;
+                          let colorClass = 'text-gray-300';
+                          
+                          if (current !== null && baseline !== null) {
+                            if (current > baseline) colorClass = 'text-green-400 font-semibold';
+                            else if (current < baseline) colorClass = 'text-red-400 font-semibold';
+                          }
+
+                          return (
+                            <td key={hidx} className={`text-center p-4 ${colorClass}`}>
+                              {current !== null && current !== undefined
+                                ? `AED ${current.toFixed(2)}`
+                                : '—'}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasBaseline || !dashboardData) {
+    return (
+      <div className="min-h-screen bg-[#0b0b0f] flex items-center justify-center p-6" data-testid="setup-section">
+        <div className="w-full max-w-2xl space-y-6">
+          <div className="text-center space-y-2">
+            <h1 className="text-5xl font-bold text-green-400" data-testid="app-title">📊 MENU PRICE TRACKER</h1>
+            <p className="text-gray-400 text-lg" data-testid="app-subtitle">Talabat UAE · Competitive Pricing Intelligence</p>
+          </div>
+
+          {!hasBaseline && (
+            <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-6 space-y-4">
+              <h2 className="text-xl font-semibold text-white">Upload Master File (Baseline)</h2>
+              <p className="text-gray-400 text-sm">
+                Upload the Master_Price_Tracker_v3.xlsx file to set the baseline (24-Feb-25)
+              </p>
+              <Input
+                type="text"
+                placeholder="Baseline date (e.g., 24-Feb-25)"
+                value={baselineDate}
+                onChange={(e) => setBaselineDate(e.target.value)}
+                className="bg-[#0b0b0f] border-[#1a1a1f] text-white placeholder:text-gray-500 mb-3"
+                data-testid="baseline-date-input"
+              />
+              <Input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleMasterUpload}
+                className="bg-[#0b0b0f] border-[#1a1a1f] text-white cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-green-400/10 file:text-green-400 file:font-medium hover:file:bg-green-400/20"
+                data-testid="master-file-input"
+              />
+            </div>
+          )}
+
+          {hasBaseline && (
+            <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-6 space-y-4">
+              <h2 className="text-xl font-semibold text-white">Upload Scrape Data</h2>
+              <p className="text-gray-400 text-sm">
+                Upload your first scrape files to start tracking price changes
+              </p>
+              <Input
+                type="text"
+                placeholder="e.g., 10-Mar-25"
+                value={scrapeDate}
+                onChange={(e) => setScrapeDate(e.target.value)}
+                className="bg-[#0b0b0f] border-[#1a1a1f] text-white placeholder:text-gray-500"
+                data-testid="scrape-date-input"
+              />
+              <Input
+                type="file"
+                accept=".xlsx,.xls"
+                multiple
+                onChange={handleScrapeUpload}
+                className="bg-[#0b0b0f] border-[#1a1a1f] text-white cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-green-400/10 file:text-green-400 file:font-medium hover:file:bg-green-400/20"
+                data-testid="scrape-files-input"
+              />
             </div>
           )}
         </div>
-
-        {/* Step 2: Scrape Files */}
-        <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-6 space-y-4" data-testid="scrape-upload-card">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-green-400/10 flex items-center justify-center text-green-400 font-bold" data-testid="step-2-badge">
-              2
-            </div>
-            <h2 className="text-xl font-semibold text-white" data-testid="step-2-title">Upload Scrape Files + Set Date</h2>
-          </div>
-          <p className="text-gray-400 text-sm" data-testid="step-2-description">
-            Enter the scrape date and upload current menu price files (e.g., 01_Operational_Falafel.xlsx)
-          </p>
-          <div className="space-y-3">
-            <Input
-              type="text"
-              placeholder="e.g. 10-Mar-25"
-              value={scrapeDate}
-              onChange={(e) => setScrapeDate(e.target.value)}
-              className="bg-[#0b0b0f] border-[#1a1a1f] text-white placeholder:text-gray-500"
-              data-testid="scrape-date-input"
-            />
-            <Input
-              type="file"
-              accept=".xlsx,.xls"
-              multiple
-              onChange={handleScrapeUpload}
-              disabled={!baselineData}
-              className="bg-[#0b0b0f] border-[#1a1a1f] text-white cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-green-400/10 file:text-green-400 file:font-medium hover:file:bg-green-400/20 disabled:opacity-50 disabled:cursor-not-allowed"
-              data-testid="scrape-files-input"
-            />
-          </div>
-        </div>
-
-        {!baselineData && (
-          <p className="text-center text-gray-500 text-sm" data-testid="upload-instruction">
-            Start by uploading the Master file to load baseline data
-          </p>
-        )}
       </div>
-    </div>
-  );
+    );
+  }
 
-  const renderDashboard = () => {
-    const ownTotals = calculateTotals(comparisonResults, true);
-    const changeRate = ownTotals.total > 0 ? ((ownTotals.priceUp + ownTotals.priceDown + ownTotals.newItems) / ownTotals.total) * 100 : 0;
+  const vsBaselineTotals = calculateOwnBrandsTotals('vs_baseline');
+  const vsPreviousTotals = calculateOwnBrandsTotals('vs_previous');
+  const changeRate = vsBaselineTotals.total > 0 ? ((vsBaselineTotals.price_up + vsBaselineTotals.price_down + vsBaselineTotals.new_items) / vsBaselineTotals.total) * 100 : 0;
 
-    return (
-      <div className="min-h-screen p-6" data-testid="dashboard-section">
-        {/* Header */}
-        <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-6 mb-6" data-testid="dashboard-header">
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div>
-              <h1 className="text-3xl font-bold text-green-400 mb-1" data-testid="dashboard-title">📊 MENU PRICE TRACKER</h1>
-              <p className="text-gray-400 text-sm" data-testid="dashboard-subtitle">
-                Talabat UAE · 13 Own Brands · Cumulative from 24-Feb-25 · Scrape: {scrapeDate}
-              </p>
+  return (
+    <div className="min-h-screen bg-[#0b0b0f] p-6" data-testid="dashboard-section">
+      {/* Header */}
+      <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-6 mb-6" data-testid="dashboard-header">
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-green-400 mb-1" data-testid="dashboard-title">📊 MENU PRICE TRACKER</h1>
+            <p className="text-gray-400 text-sm" data-testid="dashboard-subtitle">
+              Talabat UAE · Baseline: {baselineDate} · Latest: {dashboardData.latest_date}
+              {dashboardData.previous_date && ` · Previous: ${dashboardData.previous_date}`}
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <Button
+              onClick={() => setShowUploadModal(true)}
+              variant="outline"
+              className="bg-[#0b0b0f] border-[#1a1a1f] text-cyan-400 hover:bg-cyan-400/10"
+              data-testid="upload-data-button"
+            >
+              <Upload className="w-4 h-4 mr-2" />
+              Upload Data
+            </Button>
+            <Button
+              onClick={exportResults}
+              variant="outline"
+              className="bg-[#0b0b0f] border-[#1a1a1f] text-green-400 hover:bg-green-400/10"
+              data-testid="export-button"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Summary Section */}
+      <div className="grid md:grid-cols-2 gap-6 mb-6">
+        {/* Since Baseline */}
+        <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-6" data-testid="since-baseline-section">
+          <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+            <span className="text-green-400">📊</span>
+            Since Baseline ({baselineDate})
+          </h3>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-[#0b0b0f] rounded-lg p-3 border border-green-400/30">
+              <div className="text-green-400 text-xl font-bold">{vsBaselineTotals.price_up}</div>
+              <div className="text-gray-400 text-xs mt-1">▲ Price Up</div>
             </div>
-            <div className="flex gap-3">
-              <Button
-                onClick={exportResults}
-                variant="outline"
-                className="bg-[#0b0b0f] border-[#1a1a1f] text-green-400 hover:bg-green-400/10"
-                data-testid="export-button"
-              >
-                <Download className="w-4 h-4 mr-2" />
-                Export
-              </Button>
-              <Button
-                onClick={resetUpload}
-                variant="outline"
-                className="bg-[#0b0b0f] border-[#1a1a1f] text-white hover:bg-white/10"
-                data-testid="reset-button"
-              >
-                <RefreshCw className="w-4 h-4 mr-2" />
-                New Upload
-              </Button>
+            <div className="bg-[#0b0b0f] rounded-lg p-3 border border-red-400/30">
+              <div className="text-red-400 text-xl font-bold">{vsBaselineTotals.price_down}</div>
+              <div className="text-gray-400 text-xs mt-1">▼ Price Down</div>
+            </div>
+            <div className="bg-[#0b0b0f] rounded-lg p-3 border border-cyan-400/30">
+              <div className="text-cyan-400 text-xl font-bold">{vsBaselineTotals.new_items}</div>
+              <div className="text-gray-400 text-xs mt-1">🟢 New</div>
             </div>
           </div>
         </div>
 
-        {/* Warnings */}
-        {warnings.length > 0 && (
-          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 mb-6" data-testid="warnings-section">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <h3 className="text-yellow-500 font-semibold mb-2" data-testid="warnings-title">Warnings</h3>
-                <ul className="space-y-1 text-sm text-yellow-500/80">
-                  {warnings.map((warning, idx) => (
-                    <li key={idx} data-testid={`warning-${idx}`}>{warning}</li>
-                  ))}
-                </ul>
+        {/* Vs Last Upload */}
+        {dashboardData.previous_date && (
+          <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-6" data-testid="vs-previous-section">
+            <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+              <span className="text-purple-400">🔄</span>
+              Vs Last Upload ({dashboardData.previous_date})
+            </h3>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-[#0b0b0f] rounded-lg p-3 border border-green-400/30">
+                <div className="text-green-400 text-xl font-bold">{vsPreviousTotals.price_up}</div>
+                <div className="text-gray-400 text-xs mt-1">▲ Price Up</div>
+              </div>
+              <div className="bg-[#0b0b0f] rounded-lg p-3 border border-red-400/30">
+                <div className="text-red-400 text-xl font-bold">{vsPreviousTotals.price_down}</div>
+                <div className="text-gray-400 text-xs mt-1">▼ Price Down</div>
+              </div>
+              <div className="bg-[#0b0b0f] rounded-lg p-3 border border-cyan-400/30">
+                <div className="text-cyan-400 text-xl font-bold">{vsPreviousTotals.new_items}</div>
+                <div className="text-gray-400 text-xs mt-1">🟢 New</div>
               </div>
             </div>
           </div>
         )}
+      </div>
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6" data-testid="kpi-cards">
-          <div className="bg-[#101014] border border-green-400/30 rounded-lg p-4" data-testid="kpi-price-up">
-            <div className="text-green-400 text-2xl font-bold">{ownTotals.priceUp}</div>
-            <div className="text-gray-400 text-sm mt-1">▲ Price Up</div>
-          </div>
-          <div className="bg-[#101014] border border-red-400/30 rounded-lg p-4" data-testid="kpi-price-down">
-            <div className="text-red-400 text-2xl font-bold">{ownTotals.priceDown}</div>
-            <div className="text-gray-400 text-sm mt-1">▼ Price Down</div>
-          </div>
-          <div className="bg-[#101014] border border-cyan-400/30 rounded-lg p-4" data-testid="kpi-new-items">
-            <div className="text-cyan-400 text-2xl font-bold">{ownTotals.newItems}</div>
-            <div className="text-gray-400 text-sm mt-1">🟢 New Items</div>
-          </div>
-          <div className="bg-[#101014] border border-purple-400/30 rounded-lg p-4" data-testid="kpi-removed">
-            <div className="text-purple-400 text-2xl font-bold">{ownTotals.removed}</div>
-            <div className="text-gray-400 text-sm mt-1">🔴 Removed</div>
-          </div>
-          <div className="bg-[#101014] border border-gray-400/30 rounded-lg p-4" data-testid="kpi-no-change">
-            <div className="text-gray-400 text-2xl font-bold">{ownTotals.noChange}</div>
-            <div className="text-gray-400 text-sm mt-1">✅ No Change</div>
-          </div>
-          <div className="bg-[#101014] border border-blue-400/30 rounded-lg p-4" data-testid="kpi-total">
-            <div className="text-blue-400 text-2xl font-bold">{ownTotals.total}</div>
-            <div className="text-gray-400 text-sm mt-1">Total Items</div>
-          </div>
-        </div>
+      {/* Brand Table */}
+      <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg overflow-hidden" data-testid="brand-table">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="bg-[#0b0b0f] border-b border-[#1a1a1f]">
+                <th className="text-left p-4 text-gray-400 font-semibold text-sm">BRAND</th>
+                <th className="text-center p-4 text-gray-400 font-semibold text-sm">TYPE</th>
+                <th className="text-center p-4 text-gray-400 font-semibold text-sm">▲ UP</th>
+                <th className="text-center p-4 text-gray-400 font-semibold text-sm">▼ DN</th>
+                <th className="text-center p-4 text-gray-400 font-semibold text-sm">🟢 NEW</th>
+                <th className="text-center p-4 text-gray-400 font-semibold text-sm">🔴 REM</th>
+                <th className="text-center p-4 text-gray-400 font-semibold text-sm">✅ NC</th>
+                <th className="text-center p-4 text-gray-400 font-semibold text-sm">TOTAL</th>
+                <th className="text-center p-4 text-gray-400 font-semibold text-sm">ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {BRAND_GROUPS.map((group, groupIdx) => {
+                const ownBrand = dashboardData.brands.find(b => b.brand_name === group.own);
+                const ownData = ownBrand?.latest_data?.vs_baseline || {};
 
-        {/* Change Rate Bar */}
-        <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-6 mb-6" data-testid="change-rate-section">
-          <h3 className="text-white font-semibold mb-3" data-testid="change-rate-title">Change Rate (Own Brands)</h3>
-          <div className="flex items-center gap-4">
-            <div className="flex-1 h-8 bg-[#0b0b0f] rounded-full overflow-hidden flex">
-              <div
-                className="bg-green-400 h-full"
-                style={{ width: `${ownTotals.total > 0 ? (ownTotals.priceUp / ownTotals.total) * 100 : 0}%` }}
-                data-testid="change-rate-up-bar"
-              />
-              <div
-                className="bg-red-400 h-full"
-                style={{ width: `${ownTotals.total > 0 ? (ownTotals.priceDown / ownTotals.total) * 100 : 0}%` }}
-                data-testid="change-rate-down-bar"
-              />
-              <div
-                className="bg-cyan-400 h-full"
-                style={{ width: `${ownTotals.total > 0 ? (ownTotals.newItems / ownTotals.total) * 100 : 0}%` }}
-                data-testid="change-rate-new-bar"
-              />
-            </div>
-            <div className="text-white font-bold text-lg" data-testid="change-rate-percentage">{changeRate.toFixed(1)}%</div>
-          </div>
-        </div>
+                return (
+                  <>
+                    <tr
+                      key={`own-${groupIdx}`}
+                      className="border-b border-[#1a1a1f] bg-green-400/5 hover:bg-green-400/10"
+                      data-testid={`brand-row-own-${groupIdx}`}
+                    >
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-green-400">⭐</span>
+                          <span className="text-white font-semibold">{group.own}</span>
+                        </div>
+                      </td>
+                      <td className="text-center p-4">
+                        <span className="inline-block px-2 py-1 rounded-full bg-green-400/20 text-green-400 text-xs font-semibold">OWN</span>
+                      </td>
+                      <td className="text-center p-4">
+                        {ownData.price_up > 0 ? (
+                          <span className="inline-block px-3 py-1 rounded-full bg-green-400/20 text-green-400 text-sm font-semibold">{ownData.price_up}</span>
+                        ) : (
+                          <span className="text-gray-600">—</span>
+                        )}
+                      </td>
+                      <td className="text-center p-4">
+                        {ownData.price_down > 0 ? (
+                          <span className="inline-block px-3 py-1 rounded-full bg-red-400/20 text-red-400 text-sm font-semibold">{ownData.price_down}</span>
+                        ) : (
+                          <span className="text-gray-600">—</span>
+                        )}
+                      </td>
+                      <td className="text-center p-4">
+                        {ownData.new_items > 0 ? (
+                          <span className="inline-block px-3 py-1 rounded-full bg-cyan-400/20 text-cyan-400 text-sm font-semibold">{ownData.new_items}</span>
+                        ) : (
+                          <span className="text-gray-600">—</span>
+                        )}
+                      </td>
+                      <td className="text-center p-4">
+                        {ownData.removed > 0 ? (
+                          <span className="inline-block px-3 py-1 rounded-full bg-purple-400/20 text-purple-400 text-sm font-semibold">{ownData.removed}</span>
+                        ) : (
+                          <span className="text-gray-600">—</span>
+                        )}
+                      </td>
+                      <td className="text-center p-4">
+                        {ownData.no_change > 0 ? (
+                          <span className="inline-block px-3 py-1 rounded-full bg-gray-400/20 text-gray-400 text-sm font-semibold">{ownData.no_change}</span>
+                        ) : (
+                          <span className="text-gray-600">—</span>
+                        )}
+                      </td>
+                      <td className="text-center p-4">
+                        <span className="text-blue-400 font-semibold">{ownData.total || 0}</span>
+                      </td>
+                      <td className="text-center p-4">
+                        <Button
+                          onClick={() => viewBrandHistory(group.own)}
+                          variant="ghost"
+                          size="sm"
+                          className="text-cyan-400 hover:text-cyan-300 hover:bg-cyan-400/10"
+                          data-testid={`view-history-${groupIdx}`}
+                        >
+                          View History
+                        </Button>
+                      </td>
+                    </tr>
 
-        {/* Brand Table */}
-        <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg overflow-hidden" data-testid="brand-table">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-[#0b0b0f] border-b border-[#1a1a1f]">
-                  <th className="text-left p-4 text-gray-400 font-semibold text-sm" data-testid="table-header-brand">BRAND</th>
-                  <th className="text-center p-4 text-gray-400 font-semibold text-sm" data-testid="table-header-type">TYPE</th>
-                  <th className="text-center p-4 text-gray-400 font-semibold text-sm" data-testid="table-header-up">▲ UP</th>
-                  <th className="text-center p-4 text-gray-400 font-semibold text-sm" data-testid="table-header-down">▼ DN</th>
-                  <th className="text-center p-4 text-gray-400 font-semibold text-sm" data-testid="table-header-new">🟢 NEW</th>
-                  <th className="text-center p-4 text-gray-400 font-semibold text-sm" data-testid="table-header-removed">🔴 REM</th>
-                  <th className="text-center p-4 text-gray-400 font-semibold text-sm" data-testid="table-header-nc">✅ NC</th>
-                  <th className="text-center p-4 text-gray-400 font-semibold text-sm" data-testid="table-header-total">TOTAL</th>
-                  <th className="text-center p-4 text-gray-400 font-semibold text-sm" data-testid="table-header-chg">CHG%</th>
-                </tr>
-              </thead>
-              <tbody>
-                {BRAND_GROUPS.map((group, groupIdx) => {
-                  const ownData = comparisonResults[group.own] || {};
-                  return (
-                    <>
-                      {/* Own Brand Row */}
-                      <tr
-                        key={`own-${groupIdx}`}
-                        className="border-b border-[#1a1a1f] bg-green-400/5 hover:bg-green-400/10"
-                        data-testid={`brand-row-own-${groupIdx}`}
-                      >
-                        <td className="p-4" data-testid={`brand-name-own-${groupIdx}`}>
-                          <div className="flex items-center gap-2">
-                            <span className="text-green-400">⭐</span>
-                            <span className="text-white font-semibold">{group.own}</span>
-                          </div>
-                        </td>
-                        <td className="text-center p-4" data-testid={`brand-type-own-${groupIdx}`}>
-                          <span className="inline-block px-2 py-1 rounded-full bg-green-400/20 text-green-400 text-xs font-semibold">
-                            OWN
-                          </span>
-                        </td>
-                        <td className="text-center p-4" data-testid={`brand-up-own-${groupIdx}`}>
-                          {ownData.priceUp > 0 ? (
-                            <span className="inline-block px-3 py-1 rounded-full bg-green-400/20 text-green-400 text-sm font-semibold">
-                              {ownData.priceUp}
-                            </span>
-                          ) : (
-                            <span className="text-gray-600">—</span>
-                          )}
-                        </td>
-                        <td className="text-center p-4" data-testid={`brand-down-own-${groupIdx}`}>
-                          {ownData.priceDown > 0 ? (
-                            <span className="inline-block px-3 py-1 rounded-full bg-red-400/20 text-red-400 text-sm font-semibold">
-                              {ownData.priceDown}
-                            </span>
-                          ) : (
-                            <span className="text-gray-600">—</span>
-                          )}
-                        </td>
-                        <td className="text-center p-4" data-testid={`brand-new-own-${groupIdx}`}>
-                          {ownData.newItems > 0 ? (
-                            <span className="inline-block px-3 py-1 rounded-full bg-cyan-400/20 text-cyan-400 text-sm font-semibold">
-                              {ownData.newItems}
-                            </span>
-                          ) : (
-                            <span className="text-gray-600">—</span>
-                          )}
-                        </td>
-                        <td className="text-center p-4" data-testid={`brand-removed-own-${groupIdx}`}>
-                          {ownData.removed > 0 ? (
-                            <span className="inline-block px-3 py-1 rounded-full bg-purple-400/20 text-purple-400 text-sm font-semibold">
-                              {ownData.removed}
-                            </span>
-                          ) : (
-                            <span className="text-gray-600">—</span>
-                          )}
-                        </td>
-                        <td className="text-center p-4" data-testid={`brand-nc-own-${groupIdx}`}>
-                          {ownData.noChange > 0 ? (
-                            <span className="inline-block px-3 py-1 rounded-full bg-gray-400/20 text-gray-400 text-sm font-semibold">
-                              {ownData.noChange}
-                            </span>
-                          ) : (
-                            <span className="text-gray-600">—</span>
-                          )}
-                        </td>
-                        <td className="text-center p-4" data-testid={`brand-total-own-${groupIdx}`}>
-                          <span className="text-blue-400 font-semibold">{ownData.total || 0}</span>
-                        </td>
-                        <td className="text-center p-4" data-testid={`brand-chg-own-${groupIdx}`}>
-                          <span
-                            className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${
-                              ownData.changePercent > 50
-                                ? 'bg-red-400/20 text-red-400'
-                                : ownData.changePercent > 20
-                                ? 'bg-yellow-400/20 text-yellow-400'
-                                : 'bg-green-400/20 text-green-400'
-                            }`}
-                          >
-                            {ownData.changePercent ? ownData.changePercent.toFixed(1) : '0.0'}%
-                          </span>
-                        </td>
-                      </tr>
+                    {group.competitors.map((comp, compIdx) => {
+                      const compBrand = dashboardData.brands.find(b => b.brand_name === comp);
+                      const compData = compBrand?.latest_data?.vs_baseline || {};
 
-                      {/* Competitor Rows */}
-                      {group.competitors.map((comp, compIdx) => {
-                        const compData = comparisonResults[comp] || {};
-                        return (
-                          <tr
-                            key={`comp-${groupIdx}-${compIdx}`}
-                            className="border-b border-[#1a1a1f] hover:bg-white/5"
-                            data-testid={`brand-row-comp-${groupIdx}-${compIdx}`}
-                          >
-                            <td className="p-4 pl-8" data-testid={`brand-name-comp-${groupIdx}-${compIdx}`}>
-                              <span className="text-gray-300">{comp}</span>
-                            </td>
-                            <td className="text-center p-4" data-testid={`brand-type-comp-${groupIdx}-${compIdx}`}>
-                              <span className="inline-block px-2 py-1 rounded-full bg-gray-600/20 text-gray-400 text-xs font-semibold">
-                                COMP
-                              </span>
-                            </td>
-                            <td className="text-center p-4" data-testid={`brand-up-comp-${groupIdx}-${compIdx}`}>
-                              {compData.priceUp > 0 ? (
-                                <span className="inline-block px-3 py-1 rounded-full bg-green-400/20 text-green-400 text-sm font-semibold">
-                                  {compData.priceUp}
-                                </span>
-                              ) : (
-                                <span className="text-gray-600">—</span>
-                              )}
-                            </td>
-                            <td className="text-center p-4" data-testid={`brand-down-comp-${groupIdx}-${compIdx}`}>
-                              {compData.priceDown > 0 ? (
-                                <span className="inline-block px-3 py-1 rounded-full bg-red-400/20 text-red-400 text-sm font-semibold">
-                                  {compData.priceDown}
-                                </span>
-                              ) : (
-                                <span className="text-gray-600">—</span>
-                              )}
-                            </td>
-                            <td className="text-center p-4" data-testid={`brand-new-comp-${groupIdx}-${compIdx}`}>
-                              {compData.newItems > 0 ? (
-                                <span className="inline-block px-3 py-1 rounded-full bg-cyan-400/20 text-cyan-400 text-sm font-semibold">
-                                  {compData.newItems}
-                                </span>
-                              ) : (
-                                <span className="text-gray-600">—</span>
-                              )}
-                            </td>
-                            <td className="text-center p-4" data-testid={`brand-removed-comp-${groupIdx}-${compIdx}`}>
-                              {compData.removed > 0 ? (
-                                <span className="inline-block px-3 py-1 rounded-full bg-purple-400/20 text-purple-400 text-sm font-semibold">
-                                  {compData.removed}
-                                </span>
-                              ) : (
-                                <span className="text-gray-600">—</span>
-                              )}
-                            </td>
-                            <td className="text-center p-4" data-testid={`brand-nc-comp-${groupIdx}-${compIdx}`}>
-                              {compData.noChange > 0 ? (
-                                <span className="inline-block px-3 py-1 rounded-full bg-gray-400/20 text-gray-400 text-sm font-semibold">
-                                  {compData.noChange}
-                                </span>
-                              ) : (
-                                <span className="text-gray-600">—</span>
-                              )}
-                            </td>
-                            <td className="text-center p-4" data-testid={`brand-total-comp-${groupIdx}-${compIdx}`}>
-                              <span className="text-blue-400 font-semibold">{compData.total || 0}</span>
-                            </td>
-                            <td className="text-center p-4" data-testid={`brand-chg-comp-${groupIdx}-${compIdx}`}>
-                              <span
-                                className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${
-                                  compData.changePercent > 50
-                                    ? 'bg-red-400/20 text-red-400'
-                                    : compData.changePercent > 20
-                                    ? 'bg-yellow-400/20 text-yellow-400'
-                                    : 'bg-green-400/20 text-green-400'
-                                }`}
-                              >
-                                {compData.changePercent ? compData.changePercent.toFixed(1) : '0.0'}%
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-
-                      {/* Separator between groups */}
-                      {groupIdx < BRAND_GROUPS.length - 1 && (
-                        <tr key={`separator-${groupIdx}`}>
-                          <td colSpan="9" className="h-2 bg-[#0b0b0f]"></td>
+                      return (
+                        <tr
+                          key={`comp-${groupIdx}-${compIdx}`}
+                          className="border-b border-[#1a1a1f] hover:bg-white/5"
+                          data-testid={`brand-row-comp-${groupIdx}-${compIdx}`}
+                        >
+                          <td className="p-4 pl-8">
+                            <span className="text-gray-300">{comp}</span>
+                          </td>
+                          <td className="text-center p-4">
+                            <span className="inline-block px-2 py-1 rounded-full bg-gray-600/20 text-gray-400 text-xs font-semibold">COMP</span>
+                          </td>
+                          <td className="text-center p-4">
+                            {compData.price_up > 0 ? (
+                              <span className="inline-block px-3 py-1 rounded-full bg-green-400/20 text-green-400 text-sm font-semibold">{compData.price_up}</span>
+                            ) : (
+                              <span className="text-gray-600">—</span>
+                            )}
+                          </td>
+                          <td className="text-center p-4">
+                            {compData.price_down > 0 ? (
+                              <span className="inline-block px-3 py-1 rounded-full bg-red-400/20 text-red-400 text-sm font-semibold">{compData.price_down}</span>
+                            ) : (
+                              <span className="text-gray-600">—</span>
+                            )}
+                          </td>
+                          <td className="text-center p-4">
+                            {compData.new_items > 0 ? (
+                              <span className="inline-block px-3 py-1 rounded-full bg-cyan-400/20 text-cyan-400 text-sm font-semibold">{compData.new_items}</span>
+                            ) : (
+                              <span className="text-gray-600">—</span>
+                            )}
+                          </td>
+                          <td className="text-center p-4">
+                            {compData.removed > 0 ? (
+                              <span className="inline-block px-3 py-1 rounded-full bg-purple-400/20 text-purple-400 text-sm font-semibold">{compData.removed}</span>
+                            ) : (
+                              <span className="text-gray-600">—</span>
+                            )}
+                          </td>
+                          <td className="text-center p-4">
+                            {compData.no_change > 0 ? (
+                              <span className="inline-block px-3 py-1 rounded-full bg-gray-400/20 text-gray-400 text-sm font-semibold">{compData.no_change}</span>
+                            ) : (
+                              <span className="text-gray-600">—</span>
+                            )}
+                          </td>
+                          <td className="text-center p-4">
+                            <span className="text-blue-400 font-semibold">{compData.total || 0}</span>
+                          </td>
+                          <td className="text-center p-4">
+                            <Button
+                              onClick={() => viewBrandHistory(comp)}
+                              variant="ghost"
+                              size="sm"
+                              className="text-cyan-400 hover:text-cyan-300 hover:bg-cyan-400/10"
+                              data-testid={`view-comp-history-${groupIdx}-${compIdx}`}
+                            >
+                              View History
+                            </Button>
+                          </td>
                         </tr>
-                      )}
-                    </>
-                  );
-                })}
+                      );
+                    })}
 
-                {/* Total Row */}
-                <tr className="border-t-2 border-green-400/50 bg-green-400/10" data-testid="brand-row-total">
-                  <td className="p-4" colSpan="2" data-testid="brand-total-label">
-                    <div className="flex items-center gap-2">
-                      <span className="text-green-400 text-lg">🏆</span>
-                      <span className="text-white font-bold">ALL OWN BRANDS</span>
-                    </div>
-                  </td>
-                  <td className="text-center p-4" data-testid="brand-total-up">
-                    <span className="inline-block px-3 py-1 rounded-full bg-green-400/20 text-green-400 text-sm font-bold">
-                      {ownTotals.priceUp}
-                    </span>
-                  </td>
-                  <td className="text-center p-4" data-testid="brand-total-down">
-                    <span className="inline-block px-3 py-1 rounded-full bg-red-400/20 text-red-400 text-sm font-bold">
-                      {ownTotals.priceDown}
-                    </span>
-                  </td>
-                  <td className="text-center p-4" data-testid="brand-total-new">
-                    <span className="inline-block px-3 py-1 rounded-full bg-cyan-400/20 text-cyan-400 text-sm font-bold">
-                      {ownTotals.newItems}
-                    </span>
-                  </td>
-                  <td className="text-center p-4" data-testid="brand-total-removed">
-                    <span className="inline-block px-3 py-1 rounded-full bg-purple-400/20 text-purple-400 text-sm font-bold">
-                      {ownTotals.removed}
-                    </span>
-                  </td>
-                  <td className="text-center p-4" data-testid="brand-total-nc">
-                    <span className="inline-block px-3 py-1 rounded-full bg-gray-400/20 text-gray-400 text-sm font-bold">
-                      {ownTotals.noChange}
-                    </span>
-                  </td>
-                  <td className="text-center p-4" data-testid="brand-total-total">
-                    <span className="text-blue-400 font-bold text-lg">{ownTotals.total}</span>
-                  </td>
-                  <td className="text-center p-4" data-testid="brand-total-chg">
-                    <span className="text-green-400 font-bold text-lg">{changeRate.toFixed(1)}%</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="text-center mt-6 text-gray-500 text-sm" data-testid="dashboard-footer">
-          COMPETITIVE PRICING INTELLIGENCE · TALABAT UAE
+                    {groupIdx < BRAND_GROUPS.length - 1 && (
+                      <tr key={`separator-${groupIdx}`}>
+                        <td colSpan="9" className="h-2 bg-[#0b0b0f]"></td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
-    );
-  };
 
-  return (
-    <div className="min-h-screen bg-[#0b0b0f]">
-      {comparisonResults ? renderDashboard() : renderUploadSection()}
+      {/* Upload Modal */}
+      {showUploadModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-6 z-50" data-testid="upload-modal">
+          <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-6 w-full max-w-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-white">Upload Data</h2>
+              <Button
+                onClick={() => setShowUploadModal(false)}
+                variant="ghost"
+                size="sm"
+                className="text-gray-400 hover:text-white"
+                data-testid="close-modal-button"
+              >
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Update Master */}
+              <div className="bg-[#0b0b0f] border border-[#1a1a1f] rounded-lg p-4 space-y-3">
+                <h3 className="text-white font-semibold">Update Master File (Optional)</h3>
+                <p className="text-gray-400 text-sm">Upload a new master file to update the baseline</p>
+                <Input
+                  type="text"
+                  placeholder="Baseline date (e.g., 24-Feb-25)"
+                  value={baselineDate}
+                  onChange={(e) => setBaselineDate(e.target.value)}
+                  className="bg-[#101014] border-[#1a1a1f] text-white placeholder:text-gray-500"
+                  data-testid="modal-baseline-date-input"
+                />
+                <Input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={handleMasterUpload}
+                  className="bg-[#101014] border-[#1a1a1f] text-white cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-green-400/10 file:text-green-400 file:font-medium hover:file:bg-green-400/20"
+                  data-testid="modal-master-file-input"
+                />
+              </div>
+
+              {/* Upload Scrape */}
+              <div className="bg-[#0b0b0f] border border-[#1a1a1f] rounded-lg p-4 space-y-3">
+                <h3 className="text-white font-semibold">Upload Scrape Data</h3>
+                <p className="text-gray-400 text-sm">Upload scrape files for a specific date</p>
+                <Input
+                  type="text"
+                  placeholder="e.g., 10-Mar-25"
+                  value={scrapeDate}
+                  onChange={(e) => setScrapeDate(e.target.value)}
+                  className="bg-[#101014] border-[#1a1a1f] text-white placeholder:text-gray-500"
+                  data-testid="modal-scrape-date-input"
+                />
+                <Input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  multiple
+                  onChange={handleScrapeUpload}
+                  className="bg-[#101014] border-[#1a1a1f] text-white cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-green-400/10 file:text-green-400 file:font-medium hover:file:bg-green-400/20"
+                  data-testid="modal-scrape-files-input"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="text-center mt-6 text-gray-500 text-sm">COMPETITIVE PRICING INTELLIGENCE · TALABAT UAE</div>
     </div>
   );
 };
