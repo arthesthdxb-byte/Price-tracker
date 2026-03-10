@@ -26,23 +26,28 @@ const BRAND_GROUPS = [
   { own: 'Circle Cafe', competitors: ['LDC', 'Jones the Grocer'] },
 ];
 
-// Generate date options for March 2026
+// Generate date options for 2026
 const generateDateOptions = () => {
   const dates = [];
-  const months = ['Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const months = [
+    { name: 'Feb', days: 28 },
+    { name: 'Mar', days: 31 },
+    { name: 'Apr', days: 30 },
+    { name: 'May', days: 31 },
+    { name: 'Jun', days: 30 },
+    { name: 'Jul', days: 31 },
+    { name: 'Aug', days: 31 },
+    { name: 'Sep', days: 30 },
+    { name: 'Oct', days: 31 },
+    { name: 'Nov', days: 30 },
+    { name: 'Dec', days: 31 }
+  ];
   
-  // March dates (1-31)
-  for (let day = 1; day <= 31; day++) {
-    dates.push(`${day}-Mar-26`);
-  }
-  
-  // Add future months (April onwards)
-  for (const month of months.slice(1)) {
-    const daysInMonth = month === 'Apr' || month === 'Jun' || month === 'Sep' || month === 'Nov' ? 30 : 31;
-    for (let day = 1; day <= daysInMonth; day++) {
-      dates.push(`${day}-${month}-26`);
+  months.forEach(month => {
+    for (let day = 1; day <= month.days; day++) {
+      dates.push(`${day}-${month.name}-26`);
     }
-  }
+  });
   
   return dates;
 };
