@@ -506,6 +506,20 @@ async def fix_dates():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@api_router.delete("/scrape/{scrape_date}")
+async def delete_scrape_date(scrape_date: str):
+    """Delete all scrapes for a specific date"""
+    try:
+        result = await db.scrapes.delete_many({"scrape_date": scrape_date})
+        
+        return {
+            "success": True,
+            "message": f"Deleted scrapes for {scrape_date}",
+            "deleted_count": result.deleted_count
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Include the router in the main app
 app.include_router(api_router)
 
