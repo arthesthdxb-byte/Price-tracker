@@ -37,6 +37,7 @@ const Dashboard = () => {
   const [brandHistory, setBrandHistory] = useState(null);
   const [itemsHistory, setItemsHistory] = useState(null);
   const [allHistory, setAllHistory] = useState(null);
+  const [itemFilter, setItemFilter] = useState('all'); // 'all', 'added', 'increased', 'decreased'
   const [viewMode, setViewMode] = useState('dashboard'); // 'dashboard', 'brand-history', 'items-history', 'all-history'
 
   useEffect(() => {
@@ -250,6 +251,7 @@ const Dashboard = () => {
       const response = await axios.get(`${API}/items/${encodeURIComponent(brandName)}`);
       setItemsHistory(response.data);
       setSelectedBrand(brandName);
+      setItemFilter('all'); // Reset filter
       setViewMode('items-history');
     } catch (error) {
       console.error('Error loading items history:', error);
@@ -412,7 +414,7 @@ const Dashboard = () => {
                         <td className="p-4">
                           <div className="flex items-center gap-2">
                             <span className="text-white font-semibold">{dateData.date}</span>
-                            {idx === 0 && (
+                            {dateData.date === allHistory.latest_date && (
                               <span className="inline-block px-2 py-1 rounded-full bg-green-400/20 text-green-400 text-xs font-semibold">
                                 Latest
                               </span>
@@ -621,28 +623,107 @@ const Dashboard = () => {
   }
 
   if (viewMode === 'items-history' && itemsHistory) {
+    // Filter items based on selected filter
+    const getFilteredItems = () => {
+      if (itemFilter === 'all') return itemsHistory.items;
+      
+      return itemsHistory.items.filter(item => {
+        const baseline = item.baseline_price;
+        const latestPrice = item.history[item.history.length - 1]?.price;
+        
+        if (itemFilter === 'added') {
+          return baseline === null || baseline === undefined;
+        } else if (itemFilter === 'increased') {
+          return baseline !== null && latestPrice !== null && latestPrice > baseline;
+        } else if (itemFilter === 'decreased') {
+          return baseline !== null && latestPrice !== null && latestPrice < baseline;
+        }
+        return true;
+      });
+    };
+
+    const filteredItems = getFilteredItems();
+    const totalItems = itemsHistory.items.length;
+
     return (
       <div className="min-h-screen bg-[#0b0b0f] p-6">
         <div className="max-w-7xl mx-auto">
           <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-6 mb-6">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-4">
               <div>
                 <h1 className="text-2xl font-bold text-white mb-1" data-testid="items-history-title">{selectedBrand}</h1>
                 <p className="text-gray-400 text-sm">Item-wise Price History · Baseline: {itemsHistory.baseline_date}</p>
               </div>
+              <div className="flex gap-3">
+                <Button
+                  onClick={() => setViewMode('dashboard')}
+                  variant="outline"
+                  className="bg-[#0b0b0f] border-[#1a1a1f] text-white hover:bg-white/10"
+                  data-testid="back-button"
+                >
+                  <X className="w-4 h-4 mr-2" />
+                  Back
+                </Button>
+              </div>
+            </div>
+
+            {/* Filter Buttons */}
+            <div className="flex gap-2 mt-4 flex-wrap">
               <Button
-                onClick={() => setViewMode('dashboard')}
-                variant="outline"
-                className="bg-[#0b0b0f] border-[#1a1a1f] text-white hover:bg-white/10"
-                data-testid="back-button"
+                onClick={() => setItemFilter('all')}
+                variant={itemFilter === 'all' ? 'default' : 'outline'}
+                className={itemFilter === 'all' 
+                  ? 'bg-green-400 text-black hover:bg-green-500' 
+                  : 'bg-[#0b0b0f] border-[#1a1a1f] text-gray-400 hover:bg-white/10'
+                }
+                data-testid="filter-all"
               >
-                <X className="w-4 h-4 mr-2" />
-                Back
+                All Items ({totalItems})
+              </Button>
+              <Button
+                onClick={() => setItemFilter('added')}
+                variant={itemFilter === 'added' ? 'default' : 'outline'}
+                className={itemFilter === 'added' 
+                  ? 'bg-cyan-400 text-black hover:bg-cyan-500' 
+                  : 'bg-[#0b0b0f] border-[#1a1a1f] text-cyan-400 hover:bg-cyan-400/10'
+                }
+                data-testid="filter-added"
+              >
+                🟢 Added Items
+              </Button>
+              <Button
+                onClick={() => setItemFilter('increased')}
+                variant={itemFilter === 'increased' ? 'default' : 'outline'}
+                className={itemFilter === 'increased' 
+                  ? 'bg-green-400 text-black hover:bg-green-500' 
+                  : 'bg-[#0b0b0f] border-[#1a1a1f] text-green-400 hover:bg-green-400/10'
+                }
+                data-testid="filter-increased"
+              >
+                ▲ Price Increased
+              </Button>
+              <Button
+                onClick={() => setItemFilter('decreased')}
+                variant={itemFilter === 'decreased' ? 'default' : 'outline'}
+                className={itemFilter === 'decreased' 
+                  ? 'bg-red-400 text-black hover:bg-red-500' 
+                  : 'bg-[#0b0b0f] border-[#1a1a1f] text-red-400 hover:bg-red-400/10'
+                }
+                data-testid="filter-decreased"
+              >
+                ▼ Price Decreased
               </Button>
             </div>
+
+            {filteredItems.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                No items match the selected filter
+              </div>
+            )}
           </div>
 
           <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg overflow-hidden">
+            {filteredItems.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -655,7 +736,7 @@ const Dashboard = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {itemsHistory.items.map((item, idx) => {
+                  {filteredItems.map((item, idx) => {
                     const hasChanges = item.history.some((h, i) => {
                       if (i === 0) return false;
                       const prevPrice = item.baseline_price;
@@ -701,6 +782,7 @@ const Dashboard = () => {
                 </tbody>
               </table>
             </div>
+            )}
           </div>
         </div>
       </div>

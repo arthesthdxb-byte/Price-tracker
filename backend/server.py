@@ -401,7 +401,7 @@ async def get_all_history():
         
         # Calculate summary for each date (own brands only)
         dates_summary = []
-        for date in sorted(dates_data.keys(), reverse=True):
+        for date in sorted(dates_data.keys()):  # Chronological order
             own_data = dates_data[date]["own_brands_only"]
             
             total_price_up = sum(b["price_up"] for b in own_data.values())
@@ -425,7 +425,7 @@ async def get_all_history():
         latest_date = sorted(dates_data.keys(), reverse=True)[0] if dates_data else None
         
         return {
-            "dates_summary": dates_summary,
+            "dates_summary": dates_summary,  # Already in chronological order
             "latest_date": latest_date,
             "total_brands": len(set(brand for date_data in dates_data.values() for brand in date_data["brands"].keys())),
             "own_brands_count": len(own_brands)
