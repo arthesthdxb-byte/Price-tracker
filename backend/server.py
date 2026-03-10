@@ -520,6 +520,59 @@ async def delete_scrape_date(scrape_date: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@api_router.post("/fix-brand-data")
+async def fix_brand_data():
+    """Fix Mandarin Oak data by copying from baseline"""
+    try:
+        # Get Mandarin Oak baseline data
+        baseline_doc = await db.baseline.find_one(
+            {"brand_name": "Mandarin Oak"},
+            {"_id": 0}
+        )
+        
+        if not baseline_doc:
+            raise HTTPException(status_code=404, detail="Mandarin Oak not found in baseline")
+        
+        baseline_items = baseline_doc["items"]
+        dates_to_fix = ["6-Mar-26", "9-Mar-26", "11-Mar-26"]
+        
+        updated_count = 0
+        for scrape_date in dates_to_fix:
+            # Update the items for Mandarin Oak
+            result = await db.scrapes.update_one(
+                {
+                    "scrape_date": scrape_date,
+                    "brand_name": "Mandarin Oak"
+                },
+                {
+                    "$set": {
+                        "items": baseline_items,
+                        "vs_baseline": {
+                            "price_up": 0,
+                            "price_down": 0,
+                            "new_items": 0,
+                            "removed": 0,
+                            "no_change": len(baseline_items),
+                            "total": len(baseline_items),
+                            "change_percent": 0.0
+                        }
+                    }
+                }
+            )
+            if result.modified_count > 0:
+                updated_count += 1
+        
+        return {
+            "success": True,
+            "message": "Mandarin Oak data fixed",
+            "dates_updated": updated_count,
+            "items_count": len(baseline_items)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Include the router in the main app
 app.include_router(api_router)
 
