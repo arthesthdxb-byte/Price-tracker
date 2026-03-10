@@ -36,7 +36,8 @@ const Dashboard = () => {
   const [selectedBrand, setSelectedBrand] = useState(null);
   const [brandHistory, setBrandHistory] = useState(null);
   const [itemsHistory, setItemsHistory] = useState(null);
-  const [viewMode, setViewMode] = useState('dashboard'); // 'dashboard', 'brand-history', 'items-history'
+  const [allHistory, setAllHistory] = useState(null);
+  const [viewMode, setViewMode] = useState('dashboard'); // 'dashboard', 'brand-history', 'items-history', 'all-history'
 
   useEffect(() => {
     checkBaseline();
@@ -256,6 +257,17 @@ const Dashboard = () => {
     }
   };
 
+  const viewAllHistory = async () => {
+    try {
+      const response = await axios.get(`${API}/all-history`);
+      setAllHistory(response.data);
+      setViewMode('all-history');
+    } catch (error) {
+      console.error('Error loading all history:', error);
+      toast.error('Error loading all history');
+    }
+  };
+
   const exportResults = () => {
     if (!dashboardData) return;
 
@@ -325,6 +337,165 @@ const Dashboard = () => {
 
     return totals;
   };
+
+  if (viewMode === 'all-history' && allHistory) {
+    return (
+      <div className="min-h-screen bg-[#0b0b0f] p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-6 mb-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-bold text-white mb-1" data-testid="all-history-title">📅 All History Timeline</h1>
+                <p className="text-gray-400 text-sm">Day-by-day summary across all own brands · Baseline: {baselineDate}</p>
+              </div>
+              <Button
+                onClick={() => setViewMode('dashboard')}
+                variant="outline"
+                className="bg-[#0b0b0f] border-[#1a1a1f] text-white hover:bg-white/10"
+                data-testid="back-to-dashboard-button"
+              >
+                <X className="w-4 h-4 mr-2" />
+                Back
+              </Button>
+            </div>
+          </div>
+
+          {/* Summary Cards */}
+          <div className="grid md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-4">
+              <div className="text-gray-400 text-sm mb-1">Total Dates</div>
+              <div className="text-white text-2xl font-bold">{allHistory.dates_summary.length}</div>
+            </div>
+            <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-4">
+              <div className="text-gray-400 text-sm mb-1">Latest Upload</div>
+              <div className="text-green-400 text-2xl font-bold">{allHistory.latest_date}</div>
+            </div>
+            <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-4">
+              <div className="text-gray-400 text-sm mb-1">Brands Tracked</div>
+              <div className="text-blue-400 text-2xl font-bold">{allHistory.total_brands}</div>
+            </div>
+            <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-4">
+              <div className="text-gray-400 text-sm mb-1">Own Brands</div>
+              <div className="text-green-400 text-2xl font-bold">{allHistory.own_brands_count}</div>
+            </div>
+          </div>
+
+          {/* Date-by-Date Table */}
+          <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-[#0b0b0f] border-b border-[#1a1a1f]">
+                    <th className="text-left p-4 text-gray-400 font-semibold text-sm">DATE</th>
+                    <th className="text-center p-4 text-gray-400 font-semibold text-sm">BRANDS</th>
+                    <th className="text-center p-4 text-gray-400 font-semibold text-sm">▲ PRICE UP</th>
+                    <th className="text-center p-4 text-gray-400 font-semibold text-sm">▼ PRICE DOWN</th>
+                    <th className="text-center p-4 text-gray-400 font-semibold text-sm">🟢 NEW ITEMS</th>
+                    <th className="text-center p-4 text-gray-400 font-semibold text-sm">🔴 REMOVED</th>
+                    <th className="text-center p-4 text-gray-400 font-semibold text-sm">✅ NO CHANGE</th>
+                    <th className="text-center p-4 text-gray-400 font-semibold text-sm">TOTAL ITEMS</th>
+                    <th className="text-center p-4 text-gray-400 font-semibold text-sm">CHG%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allHistory.dates_summary.map((dateData, idx) => {
+                    const changePercent = dateData.total_items > 0 
+                      ? ((dateData.total_price_up + dateData.total_price_down) / dateData.total_items) * 100 
+                      : 0;
+
+                    return (
+                      <tr 
+                        key={idx} 
+                        className="border-b border-[#1a1a1f] hover:bg-white/5"
+                        data-testid={`history-date-row-${idx}`}
+                      >
+                        <td className="p-4">
+                          <div className="flex items-center gap-2">
+                            <span className="text-white font-semibold">{dateData.date}</span>
+                            {idx === 0 && (
+                              <span className="inline-block px-2 py-1 rounded-full bg-green-400/20 text-green-400 text-xs font-semibold">
+                                Latest
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="text-center p-4 text-gray-300">{dateData.brands_count}</td>
+                        <td className="text-center p-4">
+                          {dateData.total_price_up > 0 ? (
+                            <span className="inline-block px-3 py-1 rounded-full bg-green-400/20 text-green-400 text-sm font-semibold">
+                              {dateData.total_price_up}
+                            </span>
+                          ) : (
+                            <span className="text-gray-600">—</span>
+                          )}
+                        </td>
+                        <td className="text-center p-4">
+                          {dateData.total_price_down > 0 ? (
+                            <span className="inline-block px-3 py-1 rounded-full bg-red-400/20 text-red-400 text-sm font-semibold">
+                              {dateData.total_price_down}
+                            </span>
+                          ) : (
+                            <span className="text-gray-600">—</span>
+                          )}
+                        </td>
+                        <td className="text-center p-4">
+                          {dateData.total_new_items > 0 ? (
+                            <span className="inline-block px-3 py-1 rounded-full bg-cyan-400/20 text-cyan-400 text-sm font-semibold">
+                              {dateData.total_new_items}
+                            </span>
+                          ) : (
+                            <span className="text-gray-600">—</span>
+                          )}
+                        </td>
+                        <td className="text-center p-4">
+                          {dateData.total_removed > 0 ? (
+                            <span className="inline-block px-3 py-1 rounded-full bg-purple-400/20 text-purple-400 text-sm font-semibold">
+                              {dateData.total_removed}
+                            </span>
+                          ) : (
+                            <span className="text-gray-600">—</span>
+                          )}
+                        </td>
+                        <td className="text-center p-4">
+                          {dateData.total_no_change > 0 ? (
+                            <span className="inline-block px-3 py-1 rounded-full bg-gray-400/20 text-gray-400 text-sm font-semibold">
+                              {dateData.total_no_change}
+                            </span>
+                          ) : (
+                            <span className="text-gray-600">—</span>
+                          )}
+                        </td>
+                        <td className="text-center p-4">
+                          <span className="text-blue-400 font-semibold">{dateData.total_items}</span>
+                        </td>
+                        <td className="text-center p-4">
+                          <span
+                            className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${
+                              changePercent > 50
+                                ? 'bg-red-400/20 text-red-400'
+                                : changePercent > 20
+                                ? 'bg-yellow-400/20 text-yellow-400'
+                                : 'bg-green-400/20 text-green-400'
+                            }`}
+                          >
+                            {changePercent.toFixed(1)}%
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="text-center mt-6 text-gray-500 text-sm">
+            All comparisons are vs. Baseline ({baselineDate})
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (viewMode === 'brand-history' && brandHistory) {
     return (
@@ -615,6 +786,14 @@ const Dashboard = () => {
             </p>
           </div>
           <div className="flex gap-3">
+            <Button
+              onClick={viewAllHistory}
+              variant="outline"
+              className="bg-[#0b0b0f] border-[#1a1a1f] text-purple-400 hover:bg-purple-400/10"
+              data-testid="view-all-history-button"
+            >
+              📅 View All History
+            </Button>
             <Button
               onClick={() => setShowUploadModal(true)}
               variant="outline"

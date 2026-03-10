@@ -363,6 +363,76 @@ async def get_items_history(brand_name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@api_router.get("/all-history")
+async def get_all_history():
+    """Get date-by-date summary across all own brands"""
+    try:
+        # Define own brands
+        own_brands = [
+            'Operational Falafel', 'Sushi DO', 'Right Bite', 'Chin Chin',
+            'Taqado', 'Pizzaro', 'Biryani Pot', 'Luca', 'High Joint',
+            'Hot Bun Sliders', 'Awani', 'Zaroob', 'Circle Cafe'
+        ]
+        
+        # Get all scrapes
+        all_scrapes = await db.scrapes.find({}, {"_id": 0}).to_list(10000)
+        
+        if not all_scrapes:
+            return {
+                "dates_summary": [],
+                "latest_date": None,
+                "total_brands": 0,
+                "own_brands_count": len(own_brands)
+            }
+        
+        # Group by date
+        dates_data = {}
+        for scrape in all_scrapes:
+            date = scrape["scrape_date"]
+            brand = scrape["brand_name"]
+            
+            if date not in dates_data:
+                dates_data[date] = {"brands": {}, "own_brands_only": {}}
+            
+            dates_data[date]["brands"][brand] = scrape["vs_baseline"]
+            
+            if brand in own_brands:
+                dates_data[date]["own_brands_only"][brand] = scrape["vs_baseline"]
+        
+        # Calculate summary for each date (own brands only)
+        dates_summary = []
+        for date in sorted(dates_data.keys(), reverse=True):
+            own_data = dates_data[date]["own_brands_only"]
+            
+            total_price_up = sum(b["price_up"] for b in own_data.values())
+            total_price_down = sum(b["price_down"] for b in own_data.values())
+            total_new_items = sum(b["new_items"] for b in own_data.values())
+            total_removed = sum(b["removed"] for b in own_data.values())
+            total_no_change = sum(b["no_change"] for b in own_data.values())
+            total_items = sum(b["total"] for b in own_data.values())
+            
+            dates_summary.append({
+                "date": date,
+                "brands_count": len(own_data),
+                "total_price_up": total_price_up,
+                "total_price_down": total_price_down,
+                "total_new_items": total_new_items,
+                "total_removed": total_removed,
+                "total_no_change": total_no_change,
+                "total_items": total_items
+            })
+        
+        latest_date = sorted(dates_data.keys(), reverse=True)[0] if dates_data else None
+        
+        return {
+            "dates_summary": dates_summary,
+            "latest_date": latest_date,
+            "total_brands": len(set(brand for date_data in dates_data.values() for brand in date_data["brands"].keys())),
+            "own_brands_count": len(own_brands)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Include the router in the main app
 app.include_router(api_router)
 
