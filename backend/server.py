@@ -182,19 +182,31 @@ async def upload_scrape(data: ScrapeUpload):
         
         baseline = {doc["brand_name"]: doc["items"] for doc in baseline_docs}
         
-        # Get previous scrape (most recent before this date)
-        previous_scrapes = await db.scrapes.find(
+        # Get all existing scrape dates (excluding current date)
+        existing_scrapes = await db.scrapes.find(
             {"scrape_date": {"$ne": data.scrape_date}},
             {"_id": 0}
-        ).sort("uploaded_at", -1).limit(100).to_list(100)
+        ).to_list(10000)
         
+        # Find the most recent previous date
         previous_by_brand = {}
-        if previous_scrapes:
-            # Group by brand and get the most recent for each
-            for scrape in previous_scrapes:
-                brand = scrape["brand_name"]
-                if brand not in previous_by_brand:
-                    previous_by_brand[brand] = scrape["items"]
+        if existing_scrapes:
+            # Get all unique dates
+            all_dates = list(set(scrape["scrape_date"] for scrape in existing_scrapes))
+            # Sort chronologically and get the most recent one before current upload
+            sorted_dates = sorted(all_dates, key=parse_date_for_sorting)
+            
+            # Get the latest previous date
+            current_date_obj = parse_date_for_sorting(data.scrape_date)
+            previous_dates = [d for d in sorted_dates if parse_date_for_sorting(d) < current_date_obj]
+            
+            if previous_dates:
+                most_recent_previous = previous_dates[-1]  # Last date before current
+                
+                # Get scrapes for that date
+                for scrape in existing_scrapes:
+                    if scrape["scrape_date"] == most_recent_previous:
+                        previous_by_brand[scrape["brand_name"]] = scrape["items"]
         
         # Delete existing scrapes for this date
         await db.scrapes.delete_many({"scrape_date": data.scrape_date})
@@ -264,10 +276,10 @@ async def get_dashboard():
                 "vs_previous": scrape.get("vs_previous")
             }
         
-        # Sort dates
-        sorted_dates = sorted(dates, reverse=True)
-        latest_date = sorted_dates[0] if sorted_dates else None
-        previous_date = sorted_dates[1] if len(sorted_dates) > 1 else None
+        # Sort dates chronologically
+        sorted_dates = sorted(dates, key=parse_date_for_sorting)
+        latest_date = sorted_dates[-1] if sorted_dates else None
+        previous_date = sorted_dates[-2] if len(sorted_dates) > 1 else None
         
         # Build response
         brands_list = []
