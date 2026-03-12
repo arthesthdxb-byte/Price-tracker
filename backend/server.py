@@ -385,8 +385,29 @@ async def get_brand_history(brand_name: str):
         history = []
         for scrape in scrapes:
             vs_baseline = scrape["vs_baseline"]
-            history.append({
+            vs_previous = scrape.get("vs_previous")
+            entry = {
                 "date": scrape["scrape_date"],
+                "vs_baseline": {
+                    "price_up": vs_baseline["price_up"],
+                    "price_down": vs_baseline["price_down"],
+                    "new_items": vs_baseline["new_items"],
+                    "removed": vs_baseline["removed"],
+                    "no_change": vs_baseline["no_change"],
+                    "total": vs_baseline["total"],
+                    "change_percent": vs_baseline["change_percent"],
+                },
+                "vs_previous": {
+                    "price_up": vs_previous["price_up"],
+                    "price_down": vs_previous["price_down"],
+                    "new_items": vs_previous["new_items"],
+                    "removed": vs_previous["removed"],
+                    "no_change": vs_previous["no_change"],
+                    "total": vs_previous["total"],
+                    "change_percent": vs_previous["change_percent"],
+                } if vs_previous else None,
+                "ai_summary": scrape.get("ai_summary"),
+                # Keep flat fields for backward compat
                 "price_up": vs_baseline["price_up"],
                 "price_down": vs_baseline["price_down"],
                 "new_items": vs_baseline["new_items"],
@@ -394,8 +415,8 @@ async def get_brand_history(brand_name: str):
                 "no_change": vs_baseline["no_change"],
                 "total": vs_baseline["total"],
                 "change_percent": vs_baseline["change_percent"],
-                "ai_summary": scrape.get("ai_summary")
-            })
+            }
+            history.append(entry)
         
         return {
             "brand_name": brand_name,
@@ -421,7 +442,10 @@ async def get_items_history(brand_name: str):
         scrapes = await db.scrapes.find(
             {"brand_name": brand_name},
             {"_id": 0}
-        ).sort("scrape_date", 1).to_list(1000)
+        ).to_list(1000)
+        
+        # Sort chronologically using proper date parsing
+        scrapes.sort(key=lambda x: parse_date_for_sorting(x["scrape_date"]))
         
         # Build item history
         all_items = set(baseline_items.keys())
@@ -451,6 +475,55 @@ async def get_items_history(brand_name: str):
             "brand_name": brand_name,
             "baseline_date": baseline_date,
             "items": items_history
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/compare/{target_date}")
+async def compare_with_date(target_date: str):
+    """Compare latest scrape data against a specific target date for all brands"""
+    try:
+        all_scrapes = await db.scrapes.find({}, {"_id": 0}).to_list(10000)
+        
+        if not all_scrapes:
+            return {"brands": [], "latest_date": None, "target_date": target_date}
+        
+        # Group scrapes by brand and date
+        brand_date_items = {}
+        dates = set()
+        for scrape in all_scrapes:
+            brand = scrape["brand_name"]
+            date = scrape["scrape_date"]
+            dates.add(date)
+            if brand not in brand_date_items:
+                brand_date_items[brand] = {}
+            brand_date_items[brand][date] = scrape["items"]
+        
+        sorted_dates = sorted(dates, key=parse_date_for_sorting)
+        latest_date = sorted_dates[-1] if sorted_dates else None
+        
+        # Compare latest vs target for each brand
+        brands_comparison = []
+        for brand_name, date_data in brand_date_items.items():
+            latest_items = date_data.get(latest_date, {})
+            target_items = date_data.get(target_date, {})
+            
+            if latest_items and target_items:
+                stats = compare_items(target_items, latest_items)
+                brands_comparison.append({
+                    "brand_name": brand_name,
+                    "stats": stats.model_dump()
+                })
+            elif latest_items:
+                brands_comparison.append({
+                    "brand_name": brand_name,
+                    "stats": {"price_up": 0, "price_down": 0, "new_items": len(latest_items), "removed": 0, "no_change": 0, "total": len(latest_items), "change_percent": 0}
+                })
+        
+        return {
+            "latest_date": latest_date,
+            "target_date": target_date,
+            "brands": brands_comparison
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
