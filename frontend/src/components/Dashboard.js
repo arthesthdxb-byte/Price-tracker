@@ -16,14 +16,15 @@ const BRAND_GROUPS = [
   { own: 'Right Bite', competitors: ['The 500 Calorie Project', 'Kcal'] },
   { own: 'Chin Chin', competitors: ['Mandarin Oak', 'China Bistro'] },
   { own: 'Taqado', competitors: ['Tortilla', 'Chipotle'] },
-  { own: 'Pizzaro', competitors: ['Pizza di Rocco', 'Oregano'] },
+  { own: 'Pizzaro', competitors: ['Pizza di Rocco', 'Oregano', 'Pizza Hut'] },
   { own: 'Biryani Pot', competitors: ['Gazebo', 'Art of Dum'] },
   { own: 'Luca', competitors: ['Pasta Della Nonna', 'The Pasta Cup'] },
   { own: 'High Joint', competitors: ['Just Burger', 'Krush Burger'] },
   { own: 'Hot Bun Sliders', competitors: ['Slider Stop'] },
   { own: 'Awani', competitors: ['Bait Maryam', 'Al Safadi'] },
   { own: 'Zaroob', competitors: ['Allo Beirut', 'Barbar'] },
-  { own: 'Circle Cafe', competitors: ['LDC', 'Jones the Grocer'] },
+  { own: 'Circle Cafe', competitors: ['LDC', 'Jones the Grocer', 'Parkers'] },
+  { own: 'KFC', competitors: [] },
 ];
 
 // Generate date options for 2026
@@ -967,7 +968,7 @@ const Dashboard = () => {
           <div className="bg-[#101014] border border-[#1a1a1f] rounded-lg p-6" data-testid="vs-previous-section">
             <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
               <span className="text-purple-400">🔄</span>
-              Vs Last Upload ({dashboardData.previous_date})
+              Vs Last Upload (Updated: {dashboardData.previous_date})
             </h3>
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-[#0b0b0f] rounded-lg p-3 border border-green-400/30">

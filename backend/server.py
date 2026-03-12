@@ -407,7 +407,7 @@ async def get_all_history():
         own_brands = [
             'Operational Falafel', 'Sushi DO', 'Right Bite', 'Chin Chin',
             'Taqado', 'Pizzaro', 'Biryani Pot', 'Luca', 'High Joint',
-            'Hot Bun Sliders', 'Awani', 'Zaroob', 'Circle Cafe'
+            'Hot Bun Sliders', 'Awani', 'Zaroob', 'Circle Cafe', 'KFC'
         ]
         
         # Get all scrapes
@@ -570,6 +570,61 @@ async def fix_brand_data():
         }
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class NewBrandsData(BaseModel):
+    brands: Dict[str, Dict[str, float]]
+
+@api_router.post("/add-new-brands")
+async def add_new_brands(data: NewBrandsData):
+    """Add new brands (Pizza Hut, KFC, Parkers) to baseline and all existing scrapes"""
+    try:
+        baseline_date = "24-Feb-26"
+        dates_to_update = ["6-Mar-26", "9-Mar-26", "11-Mar-26"]
+        
+        # Add to baseline
+        baseline_docs = []
+        for brand_name, items in data.brands.items():
+            baseline_docs.append({
+                "brand_name": brand_name,
+                "items": items,
+                "baseline_date": baseline_date,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            })
+        
+        if baseline_docs:
+            await db.baseline.insert_many(baseline_docs)
+        
+        # Add to existing scrapes with 0 changes
+        scrapes_added = 0
+        for brand_name, items in data.brands.items():
+            for scrape_date in dates_to_update:
+                scrape_doc = {
+                    "scrape_date": scrape_date,
+                    "brand_name": brand_name,
+                    "items": items,
+                    "vs_baseline": {
+                        "price_up": 0,
+                        "price_down": 0,
+                        "new_items": 0,
+                        "removed": 0,
+                        "no_change": len(items),
+                        "total": len(items),
+                        "change_percent": 0.0
+                    },
+                    "vs_previous": None,
+                    "uploaded_at": datetime.now(timezone.utc).isoformat()
+                }
+                await db.scrapes.insert_one(scrape_doc)
+                scrapes_added += 1
+        
+        return {
+            "success": True,
+            "message": "New brands added",
+            "baseline_brands_added": len(data.brands),
+            "scrapes_added": scrapes_added
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
