@@ -4,6 +4,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import json
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Optional, Any
@@ -73,6 +74,21 @@ class ItemPriceHistory(BaseModel):
     brand_name: str
     baseline_price: Optional[float]
     history: List[Dict[str, Any]]
+
+class BrandGroup(BaseModel):
+    own_brand: str
+    competitors: List[str] = []
+    group_order: int
+
+class BrandGroupCreate(BaseModel):
+    own_brand: str
+    competitors: List[str] = []
+    group_order: int
+
+class BrandGroupUpdate(BaseModel):
+    own_brand: Optional[str] = None
+    competitors: Optional[List[str]] = None
+    group_order: Optional[int] = None
 
 # Helper functions
 def compare_items(baseline_items: Dict[str, float], scrape_items: Dict[str, float]) -> ComparisonStats:
@@ -176,11 +192,12 @@ async def get_baseline():
 async def upload_scrape(data: ScrapeUpload):
     """Upload daily scrape data and calculate comparisons"""
     try:
+        # Get brand groups for own brands identification
+        brand_groups = await db.brand_groups.find({}, {"_id": 0}).to_list(1000)
+        own_brands = [group["own_brand"] for group in brand_groups]
+        
         # Get baseline data
         baseline_docs = await db.baseline.find({}, {"_id": 0}).to_list(1000)
-        if not baseline_docs:
-            raise HTTPException(status_code=400, detail="Baseline data not found. Please upload master file first.")
-        
         baseline = {doc["brand_name"]: doc["items"] for doc in baseline_docs}
         
         # Get all existing scrape dates (excluding current date)
@@ -192,19 +209,14 @@ async def upload_scrape(data: ScrapeUpload):
         # Find the most recent previous date
         previous_by_brand = {}
         if existing_scrapes:
-            # Get all unique dates
             all_dates = list(set(scrape["scrape_date"] for scrape in existing_scrapes))
-            # Sort chronologically and get the most recent one before current upload
             sorted_dates = sorted(all_dates, key=parse_date_for_sorting)
             
-            # Get the latest previous date
             current_date_obj = parse_date_for_sorting(data.scrape_date)
             previous_dates = [d for d in sorted_dates if parse_date_for_sorting(d) < current_date_obj]
             
             if previous_dates:
-                most_recent_previous = previous_dates[-1]  # Last date before current
-                
-                # Get scrapes for that date
+                most_recent_previous = previous_dates[-1]
                 for scrape in existing_scrapes:
                     if scrape["scrape_date"] == most_recent_previous:
                         previous_by_brand[scrape["brand_name"]] = scrape["items"]
@@ -212,10 +224,26 @@ async def upload_scrape(data: ScrapeUpload):
         # Delete existing scrapes for this date
         await db.scrapes.delete_many({"scrape_date": data.scrape_date})
         
+        # Track brands without baseline (for auto-baseline creation)
+        new_baselines = []
+        
         # Process and store scrapes
         scrape_docs = []
+        comparison_data = {}
+        
         for brand_name, items in data.brands.items():
             baseline_items = baseline.get(brand_name, {})
+            
+            # If no baseline exists for this brand, create one automatically
+            if not baseline_items:
+                new_baselines.append({
+                    "brand_name": brand_name,
+                    "items": items,
+                    "baseline_date": data.scrape_date,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                })
+                baseline_items = items  # Use this scrape as baseline for comparison
+            
             previous_items = previous_by_brand.get(brand_name, {})
             
             vs_baseline = compare_items(baseline_items, items)
@@ -230,9 +258,31 @@ async def upload_scrape(data: ScrapeUpload):
                 "uploaded_at": datetime.now(timezone.utc).isoformat()
             }
             scrape_docs.append(scrape_doc)
+            
+            # Track for AI summary
+            comparison_data[brand_name] = {
+                "vs_baseline": vs_baseline.model_dump(),
+                "is_own_brand": brand_name in own_brands
+            }
         
+        # Insert new baselines if any
+        if new_baselines:
+            await db.baseline.insert_many(new_baselines)
+        
+        # Insert scrapes
         if scrape_docs:
             await db.scrapes.insert_many(scrape_docs)
+        
+        # Generate AI summary
+        ai_summary = None
+        if not data.set_as_baseline:  # Skip summary for baseline updates
+            ai_summary = await generate_ai_summary(data.scrape_date, comparison_data)
+            if ai_summary:
+                # Update all scrapes for this date with the summary
+                await db.scrapes.update_many(
+                    {"scrape_date": data.scrape_date},
+                    {"$set": {"ai_summary": ai_summary}}
+                )
         
         # Update baseline if requested
         if data.set_as_baseline:
@@ -252,7 +302,9 @@ async def upload_scrape(data: ScrapeUpload):
             "success": True,
             "scrape_date": data.scrape_date,
             "brands_count": len(scrape_docs),
-            "baseline_updated": data.set_as_baseline
+            "baseline_updated": data.set_as_baseline,
+            "new_baselines_created": len(new_baselines),
+            "ai_summary": ai_summary
         }
     except HTTPException:
         raise
@@ -325,7 +377,10 @@ async def get_brand_history(brand_name: str):
         scrapes = await db.scrapes.find(
             {"brand_name": brand_name},
             {"_id": 0}
-        ).sort("scrape_date", 1).to_list(1000)
+        ).to_list(1000)
+        
+        # Sort chronologically
+        scrapes.sort(key=lambda x: parse_date_for_sorting(x["scrape_date"]))
         
         history = []
         for scrape in scrapes:
@@ -338,7 +393,8 @@ async def get_brand_history(brand_name: str):
                 "removed": vs_baseline["removed"],
                 "no_change": vs_baseline["no_change"],
                 "total": vs_baseline["total"],
-                "change_percent": vs_baseline["change_percent"]
+                "change_percent": vs_baseline["change_percent"],
+                "ai_summary": scrape.get("ai_summary")
             })
         
         return {
@@ -403,12 +459,9 @@ async def get_items_history(brand_name: str):
 async def get_all_history():
     """Get date-by-date summary across all own brands"""
     try:
-        # Define own brands
-        own_brands = [
-            'Operational Falafel', 'Sushi DO', 'Right Bite', 'Chin Chin',
-            'Taqado', 'Pizzaro', 'Biryani Pot', 'Luca', 'High Joint',
-            'Hot Bun Sliders', 'Awani', 'Zaroob', 'Circle Cafe', 'KFC'
-        ]
+        # Get own brands dynamically from brand_groups
+        brand_groups = await db.brand_groups.find({}, {"_id": 0}).to_list(1000)
+        own_brands = [group["own_brand"] for group in brand_groups]
         
         # Get all scrapes
         all_scrapes = await db.scrapes.find({}, {"_id": 0}).to_list(10000)
@@ -628,6 +681,165 @@ async def add_new_brands(data: NewBrandsData):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Brand Groups CRUD
+@api_router.get("/brand-groups")
+async def get_brand_groups():
+    """Get all brand groups sorted by group_order"""
+    try:
+        groups = await db.brand_groups.find({}, {"_id": 0}).sort("group_order", 1).to_list(1000)
+        return {"brand_groups": groups}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/brand-groups")
+async def create_brand_group(group: BrandGroupCreate):
+    """Create a new brand group"""
+    try:
+        group_doc = group.model_dump()
+        await db.brand_groups.insert_one(group_doc)
+        return {"success": True, "message": "Brand group created"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.put("/brand-groups/{own_brand}")
+async def update_brand_group(own_brand: str, update: BrandGroupUpdate):
+    """Update an existing brand group"""
+    try:
+        update_data = {k: v for k, v in update.model_dump().items() if v is not None}
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No update data provided")
+        
+        result = await db.brand_groups.update_one(
+            {"own_brand": own_brand},
+            {"$set": update_data}
+        )
+        
+        if result.modified_count == 0:
+            raise HTTPException(status_code=404, detail="Brand group not found")
+        
+        return {"success": True, "message": "Brand group updated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.delete("/brand-groups/{own_brand}")
+async def delete_brand_group(own_brand: str):
+    """Delete a brand group"""
+    try:
+        result = await db.brand_groups.delete_one({"own_brand": own_brand})
+        
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Brand group not found")
+        
+        return {"success": True, "message": "Brand group deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# AI Summary Generation
+async def generate_ai_summary(scrape_date: str, comparison_data: dict) -> str:
+    """Generate AI summary using Claude API"""
+    try:
+        import httpx
+        api_key = os.environ.get('ANTHROPIC_API_KEY')
+        if not api_key:
+            logger.warning("ANTHROPIC_API_KEY not set, skipping AI summary")
+            return None
+        
+        # Prepare context for Claude
+        own_brands_data = []
+        for brand_name, data in comparison_data.items():
+            if data.get('is_own_brand'):
+                own_brands_data.append({
+                    "brand": brand_name,
+                    "price_up": data['vs_baseline']['price_up'],
+                    "price_down": data['vs_baseline']['price_down'],
+                    "new_items": data['vs_baseline']['new_items'],
+                    "removed": data['vs_baseline']['removed'],
+                    "total": data['vs_baseline']['total']
+                })
+        
+        prompt = f"""Analyze this menu pricing data for Talabat UAE restaurants on {scrape_date}.
+
+Key changes across 14 own brands:
+{json.dumps(own_brands_data, indent=2)}
+
+Provide a concise 2-3 sentence summary highlighting:
+1. Overall pricing trend (net increases vs decreases)
+2. Brands with most significant changes
+3. Any notable patterns (e.g., menu expansions, major price adjustments)
+
+Keep it professional and data-driven."""
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 300,
+                    "messages": [{
+                        "role": "user",
+                        "content": prompt
+                    }]
+                },
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result["content"][0]["text"]
+            else:
+                logger.error(f"Claude API error: {response.status_code} - {response.text}")
+                return None
+    except Exception as e:
+        logger.error(f"Error generating AI summary: {e}")
+        return None
+
+@api_router.post("/regenerate-summary/{scrape_date}")
+async def regenerate_summary(scrape_date: str):
+    """Regenerate AI summary for a specific date"""
+    try:
+        # Get scrapes for this date
+        scrapes = await db.scrapes.find({"scrape_date": scrape_date}, {"_id": 0}).to_list(1000)
+        if not scrapes:
+            raise HTTPException(status_code=404, detail="No data found for this date")
+        
+        # Get brand groups to identify own brands
+        brand_groups = await db.brand_groups.find({}, {"_id": 0}).to_list(1000)
+        own_brands = [group["own_brand"] for group in brand_groups]
+        
+        # Prepare comparison data
+        comparison_data = {}
+        for scrape in scrapes:
+            comparison_data[scrape["brand_name"]] = {
+                "vs_baseline": scrape["vs_baseline"],
+                "is_own_brand": scrape["brand_name"] in own_brands
+            }
+        
+        # Generate summary
+        ai_summary = await generate_ai_summary(scrape_date, comparison_data)
+        
+        if ai_summary:
+            # Store in database (update all scrapes for this date)
+            await db.scrapes.update_many(
+                {"scrape_date": scrape_date},
+                {"$set": {"ai_summary": ai_summary}}
+            )
+            return {"success": True, "summary": ai_summary}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to generate summary")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Include the router in the main app
 app.include_router(api_router)
 
@@ -645,6 +857,34 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize brand groups on startup if collection is empty"""
+    try:
+        count = await db.brand_groups.count_documents({})
+        if count == 0:
+            # Seed with existing brand groups
+            initial_groups = [
+                {"own_brand": "Operational Falafel", "competitors": ["Zaatar w Zeit", "Aloo Beirut"], "group_order": 1},
+                {"own_brand": "Sushi DO", "competitors": ["Sushi Buzz", "Sushi Art"], "group_order": 2},
+                {"own_brand": "Right Bite", "competitors": ["The 500 Calorie Project", "Kcal"], "group_order": 3},
+                {"own_brand": "Chin Chin", "competitors": ["Mandarin Oak", "China Bistro"], "group_order": 4},
+                {"own_brand": "Taqado", "competitors": ["Tortilla", "Chipotle"], "group_order": 5},
+                {"own_brand": "Pizzaro", "competitors": ["Pizza di Rocco", "Oregano", "Pizza Hut"], "group_order": 6},
+                {"own_brand": "Biryani Pot", "competitors": ["Gazebo", "Art of Dum"], "group_order": 7},
+                {"own_brand": "Luca", "competitors": ["Pasta Della Nonna", "The Pasta Cup"], "group_order": 8},
+                {"own_brand": "High Joint", "competitors": ["Just Burger", "Krush Burger"], "group_order": 9},
+                {"own_brand": "Hot Bun Sliders", "competitors": ["Slider Stop"], "group_order": 10},
+                {"own_brand": "Awani", "competitors": ["Bait Maryam", "Al Safadi"], "group_order": 11},
+                {"own_brand": "Zaroob", "competitors": ["Allo Beirut", "Barbar"], "group_order": 12},
+                {"own_brand": "Circle Cafe", "competitors": ["LDC", "Jones the Grocer", "Parkers"], "group_order": 13},
+                {"own_brand": "KFC", "competitors": [], "group_order": 14},
+            ]
+            await db.brand_groups.insert_many(initial_groups)
+            logger.info(f"Initialized {len(initial_groups)} brand groups")
+    except Exception as e:
+        logger.error(f"Error initializing brand groups: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
