@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, RefreshCw, Download, AlertTriangle, X, TrendingUp, TrendingDown } from 'lucide-react';
+import { Upload, RefreshCw, Download, AlertTriangle, X, TrendingUp, TrendingDown, Settings, ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
