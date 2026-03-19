@@ -1,0 +1,12 @@
+modules = ["nodejs-20", "python-3.12", "web"]
+[agent]
+expertMode = true
+
+[nix]
+channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+DB_NAME = "menu_price_tracker"
+REACT_APP_BACKEND_URL = "http://localhost:8001"
