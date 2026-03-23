@@ -12,9 +12,10 @@ root.render(
       position="top-right"
       toastOptions={{
         style: {
-          background: '#101014',
-          border: '1px solid #1a1a1f',
-          color: '#ffffff',
+          background: '#FFFFFF',
+          border: '1px solid #E8E8E8',
+          color: '#333333',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
         },
       }}
     />
