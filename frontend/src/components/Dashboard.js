@@ -64,6 +64,10 @@ const Dashboard = () => {
   const [editCompetitors, setEditCompetitors] = useState('');
   // AI summary
   const [expandedSummaries, setExpandedSummaries] = useState({});
+  // Staged files for upload
+  const [stagedMasterFile, setStagedMasterFile] = useState(null);
+  const [stagedScrapeFiles, setStagedScrapeFiles] = useState(null);
+  const [uploading, setUploading] = useState(false);
 
   const allBrands = useMemo(() => brandGroups.flatMap(g => [g.own, ...g.competitors]), [brandGroups]);
 
@@ -181,24 +185,26 @@ const Dashboard = () => {
   };
 
   // Uploads
-  const handleMasterUpload = async (e) => {
-    const file = e.target.files[0]; if (!file) return;
+  const handleMasterUpload = async () => {
+    if (!stagedMasterFile) return;
+    setUploading(true);
     try {
-      const brands = await parseExcelFile(file);
+      const brands = await parseExcelFile(stagedMasterFile);
       const response = await axios.post(`${API}/baseline`, { brands, baseline_date: baselineDate });
       if (response.data.success) {
         toast.success(`Master uploaded - ${response.data.brands_count} brands, ${response.data.items_count} items`);
-        setHasBaseline(true); setShowUploadModal(false);
+        setHasBaseline(true); setShowUploadModal(false); setStagedMasterFile(null);
       }
     } catch (error) { console.error('Error uploading master:', error); toast.error('Error uploading master file'); }
+    finally { setUploading(false); }
   };
 
-  const handleScrapeUpload = async (e) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    if (!scrapeDate) { toast.error('Please enter the scrape date'); return; }
+  const handleScrapeUpload = async () => {
+    if (!stagedScrapeFiles || stagedScrapeFiles.length === 0) return;
+    if (!scrapeDate) { toast.error('Please select the scrape date'); return; }
+    setUploading(true);
     try {
-      const brands = await parseScrapeFiles(files);
+      const brands = await parseScrapeFiles(stagedScrapeFiles);
       const response = await axios.post(`${API}/scrape`, { scrape_date: scrapeDate, brands, set_as_baseline: setAsBaseline });
       if (response.data.success) {
         let msg = `Scrape uploaded - ${response.data.brands_count} brands analyzed`;
@@ -207,9 +213,10 @@ const Dashboard = () => {
         if (response.data.ai_summary) msg += ' + AI summary';
         toast.success(msg);
         await loadDashboard(); await checkBaseline(); await loadBrandGroups();
-        setScrapeDate(''); setSetAsBaseline(false);
+        setScrapeDate(''); setSetAsBaseline(false); setStagedScrapeFiles(null);
       }
     } catch (error) { console.error('Error uploading scrape:', error); toast.error(error.response?.data?.detail || 'Error uploading scrape'); }
+    finally { setUploading(false); }
   };
 
   // Navigation
@@ -558,7 +565,8 @@ const Dashboard = () => {
               <h2 className="text-xl font-semibold text-white">Upload Master File (Baseline)</h2>
               <p className="text-gray-400 text-sm">Upload the Master Price Tracker xlsx file to set the baseline</p>
               <Input type="text" placeholder="Baseline date (e.g., 24-Feb-25)" value={baselineDate} onChange={(e) => setBaselineDate(e.target.value)} className="bg-[#0b0b0f] border-[#1a1a1f] text-white placeholder:text-gray-500 mb-3" data-testid="baseline-date-input" />
-              <Input type="file" accept=".xlsx,.xls" onChange={handleMasterUpload} className="bg-[#0b0b0f] border-[#1a1a1f] text-white cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-green-400/10 file:text-green-400 file:font-medium hover:file:bg-green-400/20" data-testid="master-file-input" />
+              <Input type="file" accept=".xlsx,.xls" onChange={(e) => setStagedMasterFile(e.target.files[0] || null)} className="bg-[#0b0b0f] border-[#1a1a1f] text-white cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-green-400/10 file:text-green-400 file:font-medium hover:file:bg-green-400/20" data-testid="master-file-input" />
+              {stagedMasterFile && <Button onClick={handleMasterUpload} disabled={uploading} className="bg-green-400 text-black hover:bg-green-500 w-full mt-2" data-testid="upload-master-button">{uploading ? 'Uploading...' : `Upload ${stagedMasterFile.name}`}</Button>}
             </div>
           )}
           {hasBaseline && (
@@ -569,7 +577,8 @@ const Dashboard = () => {
                 <SelectTrigger className="bg-[#0b0b0f] border-[#1a1a1f] text-white" data-testid="scrape-date-select"><SelectValue placeholder="Select date" /></SelectTrigger>
                 <SelectContent className="bg-[#0b0b0f] border-[#1a1a1f] text-white max-h-[300px]">{dateOptions.map((d) => <SelectItem key={d} value={d} className="text-white hover:bg-green-400/10">{d}</SelectItem>)}</SelectContent>
               </Select>
-              <Input type="file" accept=".xlsx,.xls" multiple onChange={handleScrapeUpload} className="bg-[#0b0b0f] border-[#1a1a1f] text-white cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-green-400/10 file:text-green-400 file:font-medium hover:file:bg-green-400/20" data-testid="scrape-files-input" />
+              <Input type="file" accept=".xlsx,.xls" multiple onChange={(e) => setStagedScrapeFiles(e.target.files.length > 0 ? e.target.files : null)} className="bg-[#0b0b0f] border-[#1a1a1f] text-white cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-green-400/10 file:text-green-400 file:font-medium hover:file:bg-green-400/20" data-testid="scrape-files-input" />
+              {stagedScrapeFiles && <Button onClick={handleScrapeUpload} disabled={uploading} className="bg-green-400 text-black hover:bg-green-500 w-full mt-2" data-testid="upload-scrape-button">{uploading ? 'Uploading...' : `Upload ${stagedScrapeFiles.length} file${stagedScrapeFiles.length > 1 ? 's' : ''}`}</Button>}
             </div>
           )}
         </div>
@@ -723,7 +732,8 @@ const Dashboard = () => {
                 <h3 className="text-white font-semibold">Update Master File (Optional)</h3>
                 <p className="text-gray-400 text-sm">Upload a new master file to update the baseline</p>
                 <Input type="text" placeholder="Baseline date" value={baselineDate} onChange={(e) => setBaselineDate(e.target.value)} className="bg-[#101014] border-[#1a1a1f] text-white placeholder:text-gray-500" data-testid="modal-baseline-date-input" />
-                <Input type="file" accept=".xlsx,.xls" onChange={handleMasterUpload} className="bg-[#101014] border-[#1a1a1f] text-white cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-green-400/10 file:text-green-400 file:font-medium hover:file:bg-green-400/20" data-testid="modal-master-file-input" />
+                <Input type="file" accept=".xlsx,.xls" onChange={(e) => setStagedMasterFile(e.target.files[0] || null)} className="bg-[#101014] border-[#1a1a1f] text-white cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-green-400/10 file:text-green-400 file:font-medium hover:file:bg-green-400/20" data-testid="modal-master-file-input" />
+                {stagedMasterFile && <Button onClick={handleMasterUpload} disabled={uploading} className="bg-green-400 text-black hover:bg-green-500 w-full" data-testid="modal-upload-master-button">{uploading ? 'Uploading...' : `Upload ${stagedMasterFile.name}`}</Button>}
               </div>
               <div className="bg-[#0b0b0f] border border-[#1a1a1f] rounded-lg p-4 space-y-3">
                 <h3 className="text-white font-semibold">Upload Scrape Data</h3>
@@ -737,7 +747,8 @@ const Dashboard = () => {
                   <label htmlFor="set-as-baseline" className="text-yellow-400 text-sm font-medium cursor-pointer">Also update baseline with this data</label>
                 </div>
                 {setAsBaseline && <p className="text-yellow-400 text-xs">This will replace the current baseline with data from the selected date.</p>}
-                <Input type="file" accept=".xlsx,.xls" multiple onChange={handleScrapeUpload} className="bg-[#101014] border-[#1a1a1f] text-white cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-green-400/10 file:text-green-400 file:font-medium hover:file:bg-green-400/20" data-testid="modal-scrape-files-input" />
+                <Input type="file" accept=".xlsx,.xls" multiple onChange={(e) => setStagedScrapeFiles(e.target.files.length > 0 ? e.target.files : null)} className="bg-[#101014] border-[#1a1a1f] text-white cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-green-400/10 file:text-green-400 file:font-medium hover:file:bg-green-400/20" data-testid="modal-scrape-files-input" />
+                {stagedScrapeFiles && <Button onClick={handleScrapeUpload} disabled={uploading} className="bg-green-400 text-black hover:bg-green-500 w-full" data-testid="modal-upload-scrape-button">{uploading ? 'Uploading...' : `Upload ${stagedScrapeFiles.length} file${stagedScrapeFiles.length > 1 ? 's' : ''}`}</Button>}
               </div>
             </div>
           </div>
