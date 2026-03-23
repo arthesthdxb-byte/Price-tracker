@@ -1,0 +1,112 @@
+[
+  {
+    "own_brand": "Operational Falafel",
+    "competitors": [
+      "Zaatar w Zeit",
+      "Aloo Beirut"
+    ],
+    "group_order": 1
+  },
+  {
+    "own_brand": "Sushi DO",
+    "competitors": [
+      "Sushi Buzz",
+      "Sushi Art"
+    ],
+    "group_order": 2
+  },
+  {
+    "own_brand": "Right Bite",
+    "competitors": [
+      "The 500 Calorie Project",
+      "Kcal"
+    ],
+    "group_order": 3
+  },
+  {
+    "own_brand": "Chin Chin",
+    "competitors": [
+      "Mandarin Oak",
+      "China Bistro"
+    ],
+    "group_order": 4
+  },
+  {
+    "own_brand": "Taqado",
+    "competitors": [
+      "Tortilla",
+      "Chipotle"
+    ],
+    "group_order": 5
+  },
+  {
+    "own_brand": "Pizzaro",
+    "competitors": [
+      "Pizza di Rocco",
+      "Oregano",
+      "Pizza Hut"
+    ],
+    "group_order": 6
+  },
+  {
+    "own_brand": "Biryani Pot",
+    "competitors": [
+      "Gazebo",
+      "Art of Dum"
+    ],
+    "group_order": 7
+  },
+  {
+    "own_brand": "Luca",
+    "competitors": [
+      "Pasta Della Nonna",
+      "The Pasta Cup"
+    ],
+    "group_order": 8
+  },
+  {
+    "own_brand": "High Joint",
+    "competitors": [
+      "Just Burger",
+      "Krush Burger"
+    ],
+    "group_order": 9
+  },
+  {
+    "own_brand": "Hot Bun Sliders",
+    "competitors": [
+      "Slider Stop"
+    ],
+    "group_order": 10
+  },
+  {
+    "own_brand": "Awani",
+    "competitors": [
+      "Bait Maryam",
+      "Al Safadi"
+    ],
+    "group_order": 11
+  },
+  {
+    "own_brand": "Zaroob",
+    "competitors": [
+      "Allo Beirut",
+      "Barbar"
+    ],
+    "group_order": 12
+  },
+  {
+    "own_brand": "Circle Cafe",
+    "competitors": [
+      "LDC",
+      "Jones the Grocer",
+      "Parkers"
+    ],
+    "group_order": 13
+  },
+  {
+    "own_brand": "KFC",
+    "competitors": [],
+    "group_order": 14
+  }
+]
