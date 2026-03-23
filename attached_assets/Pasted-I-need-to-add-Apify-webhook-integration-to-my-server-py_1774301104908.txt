@@ -1,0 +1,169 @@
+I need to add Apify webhook integration to my server.py. Here's exactly what to add:
+
+1. Add these imports at the top of server.py (alongside existing imports):
+import hashlib
+import hmac
+from fastapi import Request, Header
+
+2. Add this slug-to-brand mapping dict after the existing models (after the BrandGroupUpdate class):
+
+SLUG_TO_BRAND = {
+    "operation-falafel-downtown-burj-khalifa": "Operational Falafel",
+    "sushido": "Sushi DO",
+    "right-bite": "Right Bite",
+    "chin-chin-chinese-asian-noodles-business-bay-4": "Chin Chin",
+    "taqado-mexican-kitchen-burritos-bowls-bay-square-business-bay": "Taqado",
+    "pizzaro-italian-pizza-pasta": "Pizzaro",
+    "biryani-pot-savour-the-heritage-business-bay-4": "Biryani Pot",
+    "luca-italian-pasta": "Luca",
+    "high-joint": "High Joint",
+    "hotbun-sliders": "Hot Bun Sliders",
+    "awani-middle-eastern-flavors": "Awani",
+    "zaroob-levant-street-flavors": "Zaroob",
+    "circle-cafe-healthy-salads-bowls-difc": "Circle Cafe",
+    "kfc": "KFC",
+    "aloo-beirut": "Aloo Beirut",
+    "zaatar-w-zeit-dubai-hills": "Zaatar w Zeit",
+    "sushi-buzz": "Sushi Buzz",
+    "sushi-art-dubai-land": "Sushi Art",
+    "the-500-calorie-project-business-bay": "The 500 Calorie Project",
+    "kcal-al-satwa": "Kcal",
+    "mandarin-oak-jumeirah-lakes-towers-jlt": "Mandarin Oak",
+    "china-bistro": "China Bistro",
+    "tortilla-dubai-malldowntown-burj-khalifa": "Tortilla",
+    "chipotle": "Chipotle",
+    "pizza-di-rocco-jumeirah-lakes-towers--jlt": "Pizza di Rocco",
+    "oregano": "Oregano",
+    "pizza-hut": "Pizza Hut",
+    "gazebo-jumeirah-lakes-towers-jlt": "Gazebo",
+    "art-of-dum": "Art of Dum",
+    "pasta-della-nonna-dubai-silicon-oasis": "Pasta Della Nonna",
+    "pasta-2-go": "Pasta 2 Go",
+    "just-burger-al-quoz-1": "Just Burger",
+    "krush-burger-difc": "Krush Burger",
+    "salt-bbq-box": "Salt",
+    "chick-n-slider": "Chick N Slider",
+    "bait-maryam": "Bait Maryam",
+    "al-safadi-um-al-sheif": "Al Safadi",
+    "allo-beirut-al-badaa-city-walk": "Allo Beirut",
+    "barbar": "Barbar",
+    "ldc-kitchen-coffee": "LDC",
+    "jones-the-grocer2": "Jones the Grocer",
+    "parkers-al-mushrif": "Parkers",
+}
+
+3. Add these two helper functions right after the mapping:
+
+def extract_slug(url: str) -> str:
+    try:
+        parts = url.split("/")
+        for i, part in enumerate(parts):
+            if part == "restaurant" and i + 2 < len(parts):
+                return parts[i + 2].split("?")[0]
+    except Exception:
+        pass
+    return ""
+
+def parse_apify_items(menu_items: list) -> dict:
+    items = {}
+    for mi in menu_items:
+        name = str(mi.get("name", "")).strip()
+        if not name:
+            continue
+        orig = mi.get("originalPriceNumeric")
+        price = mi.get("price") or mi.get("priceNumeric")
+        if orig is not None and isinstance(orig, (int, float)) and orig > 0:
+            use_price = float(orig)
+        elif price is not None:
+            use_price = float(price)
+        else:
+            continue
+        if use_price > 0:
+            items[name] = use_price
+    return items
+
+4. Add this webhook endpoint (before app.include_router(api_router)):
+
+@api_router.post("/apify-webhook")
+async def apify_webhook(request: Request):
+    try:
+        body = await request.json()
+
+        if "items" in body:
+            jsonl_records = body["items"]
+            scrape_date = body.get("scrape_date", "")
+            if not scrape_date:
+                now = datetime.now(timezone.utc)
+                scrape_date = now.strftime("%-d-%b-%y").replace("-0", "-")
+            logger.info(f"[Apify Direct] Received {len(jsonl_records)} records for {scrape_date}")
+
+        elif "resource" in body:
+            resource = body.get("resource", {})
+            dataset_id = resource.get("defaultDatasetId")
+            if not dataset_id:
+                raise HTTPException(status_code=400, detail="No datasetId in webhook payload")
+            apify_token = os.environ.get("APIFY_TOKEN")
+            if not apify_token:
+                raise HTTPException(status_code=500, detail="APIFY_TOKEN not configured")
+            import httpx
+            async with httpx.AsyncClient() as http_client:
+                dataset_url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?token={apify_token}&format=json"
+                resp = await http_client.get(dataset_url, timeout=60.0)
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=502, detail=f"Apify API returned {resp.status_code}")
+                jsonl_records = resp.json()
+            now = datetime.now(timezone.utc)
+            scrape_date = now.strftime("%-d-%b-%y").replace("-0", "-")
+            logger.info(f"[Apify Webhook] Fetched {len(jsonl_records)} records from dataset {dataset_id}")
+        else:
+            raise HTTPException(status_code=400, detail="Invalid payload")
+
+        brands = {}
+        unmatched_slugs = []
+        skipped_empty = []
+
+        for record in jsonl_records:
+            url = record.get("url", "")
+            slug = extract_slug(url)
+            menu_items = record.get("menuItems", [])
+            if not menu_items:
+                skipped_empty.append(slug)
+                continue
+            brand_name = SLUG_TO_BRAND.get(slug)
+            if not brand_name:
+                unmatched_slugs.append(slug)
+                logger.warning(f"[Apify] Unmatched slug: {slug}")
+                continue
+            items = parse_apify_items(menu_items)
+            if items:
+                if brand_name in brands:
+                    brands[brand_name].update(items)
+                else:
+                    brands[brand_name] = items
+
+        if not brands:
+            return {"success": False, "error": "No valid brands parsed", "unmatched_slugs": unmatched_slugs, "skipped_empty": skipped_empty}
+
+        logger.info(f"[Apify] Parsed {len(brands)} brands, {sum(len(v) for v in brands.values())} total items")
+
+        scrape_payload = ScrapeUpload(scrape_date=scrape_date, brands=brands, set_as_baseline=False)
+        result = await upload_scrape(scrape_payload)
+
+        return {
+            "success": True,
+            "scrape_date": scrape_date,
+            "brands_parsed": len(brands),
+            "total_items": sum(len(v) for v in brands.values()),
+            "unmatched_slugs": unmatched_slugs,
+            "skipped_empty": skipped_empty,
+            "scrape_result": result
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Apify Webhook] Error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+5. Also add APIFY_TOKEN to the Replit Secrets with my Apify API token value.
+
+Do NOT modify any existing endpoints or logic. Just add these new pieces.
