@@ -832,6 +832,42 @@ async def startup_event():
     try:
         with get_db() as conn:
             cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS baseline (
+                    id SERIAL PRIMARY KEY,
+                    brand_name TEXT NOT NULL,
+                    items JSONB NOT NULL DEFAULT '{}',
+                    baseline_date TEXT,
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS scrapes (
+                    id SERIAL PRIMARY KEY,
+                    scrape_date TEXT NOT NULL,
+                    brand_name TEXT NOT NULL,
+                    items JSONB NOT NULL DEFAULT '{}',
+                    vs_baseline JSONB,
+                    vs_previous JSONB,
+                    ai_summary TEXT,
+                    uploaded_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS brand_groups (
+                    id SERIAL PRIMARY KEY,
+                    own_brand TEXT NOT NULL UNIQUE,
+                    competitors TEXT[] DEFAULT '{}',
+                    group_order INTEGER DEFAULT 0
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_baseline_brand ON baseline(brand_name)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_scrapes_date ON scrapes(scrape_date)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_scrapes_brand ON scrapes(brand_name)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_scrapes_date_brand ON scrapes(scrape_date, brand_name)")
+            conn.commit()
+            logger.info("Database schema initialized")
+
             cur.execute("SELECT COUNT(*) FROM brand_groups")
             count = cur.fetchone()[0]
             if count == 0:
