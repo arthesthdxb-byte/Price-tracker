@@ -1236,6 +1236,35 @@ async def apify_webhook(request: Request):
         logger.error(f"[Apify Webhook] Error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@api_router.post("/migrate-data")
+async def migrate_data(request: Request):
+    try:
+        data = await request.json()
+        token = data.get("token", "")
+        if token != os.environ.get("APIFY_TOKEN", ""):
+            raise HTTPException(status_code=403, detail="Invalid token")
+        with get_db() as conn:
+            cur = conn.cursor()
+            if data.get("baseline"):
+                for r in data["baseline"]:
+                    cur.execute("INSERT INTO baseline (brand_name, items) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                                (r["brand_name"], json.dumps(r["items"])))
+            if data.get("scrapes"):
+                for r in data["scrapes"]:
+                    cur.execute("INSERT INTO scrapes (scrape_date, brand_name, items) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                                (r["scrape_date"], r["brand_name"], json.dumps(r["items"])))
+            if data.get("brand_groups"):
+                cur.execute("DELETE FROM brand_groups")
+                for r in data["brand_groups"]:
+                    cur.execute("INSERT INTO brand_groups (own_brand, competitors, group_order) VALUES (%s, %s, %s)",
+                                (r["own_brand"], json.dumps(r["competitors"]), r["group_order"]))
+            cur.close()
+        return {"success": True, "message": "Data migrated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 app.include_router(api_router)
 
 app.add_middleware(
@@ -1297,31 +1326,52 @@ async def startup_event():
             conn.commit()
             logger.info("Database schema initialized")
 
-            cur.execute("SELECT COUNT(*) FROM brand_groups")
-            count = cur.fetchone()[0]
-            if count == 0:
-                initial_groups = [
-                    ("Operational Falafel", ["Zaatar w Zeit", "Aloo Beirut"], 1),
-                    ("Sushi DO", ["Sushi Buzz", "Sushi Art"], 2),
-                    ("Right Bite", ["The 500 Calorie Project", "Kcal"], 3),
-                    ("Chin Chin", ["Mandarin Oak", "China Bistro"], 4),
-                    ("Taqado", ["Tortilla", "Chipotle"], 5),
-                    ("Pizzaro", ["Pizza di Rocco", "Oregano", "Pizza Hut"], 6),
-                    ("Biryani Pot", ["Gazebo", "Art of Dum"], 7),
-                    ("Luca", ["Pasta Della Nonna", "The Pasta Cup"], 8),
-                    ("High Joint", ["Just Burger", "Krush Burger"], 9),
-                    ("Hot Bun Sliders", ["Slider Stop"], 10),
-                    ("Awani", ["Bait Maryam", "Al Safadi"], 11),
-                    ("Zaroob", ["Allo Beirut", "Barbar"], 12),
-                    ("Circle Cafe", ["LDC", "Jones the Grocer", "Parkers"], 13),
-                    ("KFC", [], 14),
-                ]
-                for own_brand, competitors, order in initial_groups:
-                    cur.execute(
-                        "INSERT INTO brand_groups (own_brand, competitors, group_order) VALUES (%s, %s, %s)",
-                        (own_brand, competitors, order)
-                    )
-                logger.info(f"Initialized {len(initial_groups)} brand groups")
+            cur.execute("SELECT COUNT(*) FROM baseline")
+            baseline_count = cur.fetchone()[0]
+            if baseline_count == 0:
+                seed_file = ROOT_DIR / "seed_data.json"
+                if seed_file.exists():
+                    logger.info("Empty database detected — loading seed data...")
+                    import json as _json
+                    with open(seed_file) as sf:
+                        seed = _json.load(sf)
+                    for r in seed.get("baseline", []):
+                        cur.execute("INSERT INTO baseline (brand_name, items) VALUES (%s, %s)",
+                                    (r["brand_name"], _json.dumps(r["items"])))
+                    for r in seed.get("scrapes", []):
+                        cur.execute("INSERT INTO scrapes (scrape_date, brand_name, items) VALUES (%s, %s, %s)",
+                                    (r["scrape_date"], r["brand_name"], _json.dumps(r["items"])))
+                    cur.execute("DELETE FROM brand_groups")
+                    for r in seed.get("brand_groups", []):
+                        cur.execute("INSERT INTO brand_groups (own_brand, competitors, group_order) VALUES (%s, %s, %s)",
+                                    (r["own_brand"], _json.dumps(r["competitors"]), r["group_order"]))
+                    conn.commit()
+                    logger.info(f"Seeded {len(seed.get('baseline', []))} baseline, {len(seed.get('scrapes', []))} scrapes, {len(seed.get('brand_groups', []))} brand groups")
+                else:
+                    cur.execute("SELECT COUNT(*) FROM brand_groups")
+                    bg_count = cur.fetchone()[0]
+                    if bg_count == 0:
+                        initial_groups = [
+                            ("Operational Falafel", ["Zaatar w Zeit", "Aloo Beirut"], 1),
+                            ("Sushi DO", ["Sushi Buzz", "Sushi Art"], 2),
+                            ("Right Bite", ["The 500 Calorie Project", "Kcal"], 3),
+                            ("Chin Chin", ["Mandarin Oak", "China Bistro"], 4),
+                            ("Taqado", ["Tortilla", "Chipotle"], 5),
+                            ("Pizzaro", ["Pizza di Rocco", "Oregano", "Pizza Hut"], 6),
+                            ("Biryani Pot", ["Gazebo", "Art of Dum"], 7),
+                            ("Luca", ["Pasta Della Nonna", "The Pasta Cup"], 8),
+                            ("High Joint", ["Just Burger", "Krush Burger"], 9),
+                            ("Hot Bun Sliders", ["Slider Stop"], 10),
+                            ("Awani", ["Bait Maryam", "Al Safadi"], 11),
+                            ("Zaroob", ["Allo Beirut", "Barbar"], 12),
+                            ("Circle Cafe", ["LDC", "Jones the Grocer", "Parkers"], 13),
+                            ("KFC", [], 14),
+                        ]
+                        for own_brand, competitors, order in initial_groups:
+                            cur.execute("INSERT INTO brand_groups (own_brand, competitors, group_order) VALUES (%s, %s, %s)",
+                                        (own_brand, competitors, order))
+                        conn.commit()
+                        logger.info(f"Initialized {len(initial_groups)} brand groups")
             cur.close()
     except Exception as e:
         logger.error(f"Error initializing brand groups: {e}")
