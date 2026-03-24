@@ -1,0 +1,20 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "7yZgV5CpkuWzKiYStyD-3"
+uri = "file://export_baseline.json"
+type = "unspecified"
+title = "Baseline Data (44 brands with menu items & prices)"
+
+[[outputs]]
+id = "52HwFXqpL-VZtL5f48bKR"
+uri = "file://export_scrapes.json"
+type = "unspecified"
+title = "All Scrape Records (441 scrapes with comparisons)"
+
+[[outputs]]
+id = "yTWJr5MqPq3xOBmErHeZw"
+uri = "file://export_brand_groups.json"
+type = "unspecified"
+title = "Brand Groups (14 groups with own brand + competitors)"

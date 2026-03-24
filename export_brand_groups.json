@@ -1,0 +1,126 @@
+[
+  {
+    "id": 15,
+    "own_brand": "Operational Falafel",
+    "competitors": [
+      "Zaatar w Zeit",
+      "Aloo Beirut"
+    ],
+    "group_order": 1
+  },
+  {
+    "id": 16,
+    "own_brand": "Sushi DO",
+    "competitors": [
+      "Sushi Buzz",
+      "Sushi Art"
+    ],
+    "group_order": 2
+  },
+  {
+    "id": 17,
+    "own_brand": "Right Bite",
+    "competitors": [
+      "The 500 Calorie Project",
+      "Kcal"
+    ],
+    "group_order": 3
+  },
+  {
+    "id": 18,
+    "own_brand": "Chin Chin",
+    "competitors": [
+      "Mandarin Oak",
+      "China Bistro"
+    ],
+    "group_order": 4
+  },
+  {
+    "id": 19,
+    "own_brand": "Taqado",
+    "competitors": [
+      "Tortilla",
+      "Chipotle"
+    ],
+    "group_order": 5
+  },
+  {
+    "id": 20,
+    "own_brand": "Pizzaro",
+    "competitors": [
+      "Pizza di Rocco",
+      "Oregano",
+      "Pizza Hut"
+    ],
+    "group_order": 6
+  },
+  {
+    "id": 21,
+    "own_brand": "Biryani Pot",
+    "competitors": [
+      "Gazebo",
+      "Art of Dum"
+    ],
+    "group_order": 7
+  },
+  {
+    "id": 22,
+    "own_brand": "Luca",
+    "competitors": [
+      "Pasta Della Nonna",
+      "The Pasta Cup"
+    ],
+    "group_order": 8
+  },
+  {
+    "id": 23,
+    "own_brand": "High Joint",
+    "competitors": [
+      "Just Burger",
+      "Krush Burger"
+    ],
+    "group_order": 9
+  },
+  {
+    "id": 24,
+    "own_brand": "Hot Bun Sliders",
+    "competitors": [
+      "Slider Stop"
+    ],
+    "group_order": 10
+  },
+  {
+    "id": 25,
+    "own_brand": "Awani",
+    "competitors": [
+      "Bait Maryam",
+      "Al Safadi"
+    ],
+    "group_order": 11
+  },
+  {
+    "id": 26,
+    "own_brand": "Zaroob",
+    "competitors": [
+      "Allo Beirut",
+      "Barbar"
+    ],
+    "group_order": 12
+  },
+  {
+    "id": 27,
+    "own_brand": "Circle Cafe",
+    "competitors": [
+      "LDC",
+      "Jones the Grocer",
+      "Parkers"
+    ],
+    "group_order": 13
+  },
+  {
+    "id": 28,
+    "own_brand": "KFC",
+    "competitors": [],
+    "group_order": 14
+  }
+]
