@@ -329,7 +329,7 @@ const Dashboard = () => {
       setNpdData(response.data);
       setNpdAvailableDates(response.data.available_dates || []);
       if (response.data.has_data) {
-        setNpdSelectedDate(response.data.latest_date);
+        setNpdSelectedDate(response.data.previous_date || '');
         setNpdSummaryLoading(true);
         try {
           const summaryRes = await axios.get(`${API}/npd-ai-summary`);
@@ -486,17 +486,20 @@ const Dashboard = () => {
                   NPD Tracker
                 </h1>
                 <p style={{ color: T.label, fontSize: 13, margin: '4px 0 0' }}>
-                  {npdData?.has_data ? `Comparing ${npdData.previous_date} → ${npdData.latest_date}` : 'Loading...'}
+                  {npdData?.has_data ? `Select historical date to compare latest data (${npdData.latest_date}) on NPD` : 'Loading...'}
                 </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {npdAvailableDates.length > 1 && (
-                  <select value={npdSelectedDate} onChange={(e) => loadNpdForDate(e.target.value)}
-                    style={{ padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.body, background: '#FFF', cursor: 'pointer' }}>
-                    {npdAvailableDates.slice(1).reverse().map(d => (
-                      <option key={d} value={d}>{d}</option>
-                    ))}
-                  </select>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 12, color: T.label, fontWeight: 500 }}>Compare against:</span>
+                    <select value={npdSelectedDate} onChange={(e) => loadNpdForDate(e.target.value)}
+                      style={{ padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.body, background: '#FFF', cursor: 'pointer' }}>
+                      {npdAvailableDates.filter(d => d !== npdData?.latest_date).reverse().map(d => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </div>
                 )}
                 <button onClick={() => setViewMode('dashboard')} style={headerBtnStyle}><X size={14} /> Back</button>
               </div>
