@@ -754,7 +754,7 @@ async def get_npd_ai_summary(target_date: str = None, baseline_date: str = None,
                 cur.close()
             return {"success": True, "summary": summary, "latest_date": sel_latest, "previous_date": sel_baseline, "cached": False}
         else:
-            raise HTTPException(status_code=500, detail="Failed to generate AI summary")
+            return {"success": True, "summary": None, "latest_date": sel_latest, "previous_date": sel_baseline, "cached": False}
     except HTTPException:
         raise
     except Exception as e:

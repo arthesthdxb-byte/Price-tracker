@@ -142,6 +142,7 @@ const Dashboard = () => {
   const [npdAvailableDates, setNpdAvailableDates] = useState([]);
   const [npdBaselineDate, setNpdBaselineDate] = useState('');
   const [npdLatestDate, setNpdLatestDate] = useState('');
+  const [npdBrandFilter, setNpdBrandFilter] = useState('all');
 
   const allBrands = useMemo(() => brandGroups.flatMap(g => [g.own, ...g.competitors]), [brandGroups]);
 
@@ -534,10 +535,43 @@ const Dashboard = () => {
             </div>
           ) : (
             <>
+              {(() => {
+                const filteredNpdBrands = npdData.brands.filter(b => {
+                  if (npdBrandFilter === 'all') return true;
+                  if (npdBrandFilter.startsWith('own:')) {
+                    const ownName = npdBrandFilter.slice(4);
+                    const group = brandGroups.find(g => g.own === ownName);
+                    if (!group) return b.brand_name === ownName;
+                    return b.brand_name === ownName || group.competitors.includes(b.brand_name);
+                  }
+                  return b.brand_name === npdBrandFilter;
+                });
+                const filteredNew = filteredNpdBrands.reduce((s, b) => s + b.new_count, 0);
+                const filteredRemoved = filteredNpdBrands.reduce((s, b) => s + b.removed_count, 0);
+                return (<>
+              <div style={{ ...cardStyle, padding: 16, marginBottom: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 13, color: T.label, fontWeight: 600 }}>Brand:</span>
+                  <select value={npdBrandFilter} onChange={(e) => setNpdBrandFilter(e.target.value)}
+                    style={{ padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.body, background: '#FFF', cursor: 'pointer', minWidth: 200 }}>
+                    <option value="all">All Brands</option>
+                    {brandGroups.map((g, idx) => (
+                      <React.Fragment key={`g-${idx}`}>
+                        <option value={`own:${g.own}`}>⭐ {g.own} + Competitors</option>
+                        <option value={g.own}>&nbsp;&nbsp;&nbsp;&nbsp;{g.own} (OWN only)</option>
+                        {g.competitors.map(c => (
+                          <option key={c} value={c}>&nbsp;&nbsp;&nbsp;&nbsp;{c}</option>
+                        ))}
+                      </React.Fragment>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 24 }}>
-                <KpiCard label="New Items Launched" value={npdData.total_new} color={T.newItem} />
-                <KpiCard label="Items Removed" value={npdData.total_removed} color={T.removed} />
-                <KpiCard label="Brands with Changes" value={npdData.brands_with_changes} color={T.primary} />
+                <KpiCard label="New Items Launched" value={filteredNew} color={T.newItem} />
+                <KpiCard label="Items Removed" value={filteredRemoved} color={T.removed} />
+                <KpiCard label="Brands with Changes" value={filteredNpdBrands.length} color={T.primary} />
               </div>
 
               <div style={{ ...cardStyle, padding: 20, marginBottom: 24 }}>
@@ -558,7 +592,7 @@ const Dashboard = () => {
                 )}
               </div>
 
-              {npdData.brands.map((brand, idx) => (
+              {filteredNpdBrands.map((brand, idx) => (
                 <div key={idx} style={{ ...cardStyle, padding: 20, marginBottom: 16 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
                     <h3 style={{ margin: 0, color: T.title, fontSize: 16, fontWeight: 600 }}>{brand.brand_name}</h3>
@@ -614,6 +648,7 @@ const Dashboard = () => {
                   )}
                 </div>
               ))}
+            </>); })()}
             </>
           )}
         </div>
