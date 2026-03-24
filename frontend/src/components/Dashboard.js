@@ -140,7 +140,8 @@ const Dashboard = () => {
   const [npdSummaryLoading, setNpdSummaryLoading] = useState(false);
   const [expandedRemovedBrands, setExpandedRemovedBrands] = useState({});
   const [npdAvailableDates, setNpdAvailableDates] = useState([]);
-  const [npdSelectedDate, setNpdSelectedDate] = useState('');
+  const [npdBaselineDate, setNpdBaselineDate] = useState('');
+  const [npdLatestDate, setNpdLatestDate] = useState('');
 
   const allBrands = useMemo(() => brandGroups.flatMap(g => [g.own, ...g.competitors]), [brandGroups]);
 
@@ -319,17 +320,24 @@ const Dashboard = () => {
     } catch (error) { toast.error('Error loading all history'); }
   };
 
+  const npdQueryParams = (bl, lt) => {
+    const params = [];
+    if (bl) params.push(`baseline_date=${encodeURIComponent(bl)}`);
+    if (lt) params.push(`latest_date=${encodeURIComponent(lt)}`);
+    return params.length > 0 ? `?${params.join('&')}` : '';
+  };
+
   const viewNpdTracker = async () => {
     setViewMode('npd');
     setNpdLoading(true);
     setNpdSummary(null);
-    setNpdSelectedDate('');
     try {
       const response = await axios.get(`${API}/npd`);
       setNpdData(response.data);
       setNpdAvailableDates(response.data.available_dates || []);
       if (response.data.has_data) {
-        setNpdSelectedDate(response.data.previous_date || '');
+        setNpdBaselineDate(response.data.previous_date || '');
+        setNpdLatestDate(response.data.latest_date || '');
         setNpdSummaryLoading(true);
         try {
           const summaryRes = await axios.get(`${API}/npd-ai-summary`);
@@ -341,17 +349,18 @@ const Dashboard = () => {
     setNpdLoading(false);
   };
 
-  const loadNpdForDate = async (date) => {
-    setNpdSelectedDate(date);
+  const loadNpdForDates = async (bl, lt) => {
+    setNpdBaselineDate(bl);
+    setNpdLatestDate(lt);
     setNpdLoading(true);
     setNpdSummary(null);
     try {
-      const response = await axios.get(`${API}/npd?target_date=${encodeURIComponent(date)}`);
+      const response = await axios.get(`${API}/npd${npdQueryParams(bl, lt)}`);
       setNpdData(response.data);
       if (response.data.has_data) {
         setNpdSummaryLoading(true);
         try {
-          const summaryRes = await axios.get(`${API}/npd-ai-summary?target_date=${encodeURIComponent(date)}`);
+          const summaryRes = await axios.get(`${API}/npd-ai-summary${npdQueryParams(bl, lt)}`);
           setNpdSummary(summaryRes.data.summary);
         } catch (err) { console.error('Error loading NPD summary:', err); }
         setNpdSummaryLoading(false);
@@ -363,8 +372,7 @@ const Dashboard = () => {
   const regenerateNpdSummary = async () => {
     setNpdSummaryLoading(true);
     try {
-      const dateParam = npdSelectedDate ? `?target_date=${encodeURIComponent(npdSelectedDate)}` : '';
-      const res = await axios.post(`${API}/npd-ai-summary/regenerate${dateParam}`);
+      const res = await axios.post(`${API}/npd-ai-summary/regenerate${npdQueryParams(npdBaselineDate, npdLatestDate)}`);
       setNpdSummary(res.data.summary);
       toast.success('NPD summary regenerated');
     } catch (error) { toast.error('Error regenerating summary'); }
@@ -486,21 +494,32 @@ const Dashboard = () => {
                   NPD Tracker
                 </h1>
                 <p style={{ color: T.label, fontSize: 13, margin: '4px 0 0' }}>
-                  {npdData?.has_data ? `Select historical date to compare latest data (${npdData.latest_date}) on NPD` : 'Loading...'}
+                  {npdData?.has_data ? `Comparing ${npdData.previous_date} → ${npdData.latest_date}` : 'Loading...'}
                 </p>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {npdAvailableDates.length > 1 && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 12, color: T.label, fontWeight: 500 }}>Compare against:</span>
-                    <select value={npdSelectedDate} onChange={(e) => loadNpdForDate(e.target.value)}
-                      style={{ padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.body, background: '#FFF', cursor: 'pointer' }}>
-                      {npdAvailableDates.filter(d => d !== npdData?.latest_date).reverse().map(d => (
-                        <option key={d} value={d}>{d}</option>
-                      ))}
-                    </select>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 13, color: T.label, fontWeight: 500 }}>Baseline:</span>
+                      <select value={npdBaselineDate} onChange={(e) => loadNpdForDates(e.target.value, npdLatestDate)}
+                        style={{ padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.body, background: '#FFF', cursor: 'pointer' }}>
+                        {npdAvailableDates.filter(d => d !== npdLatestDate).reverse().map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 13, color: T.label, fontWeight: 500 }}>Latest:</span>
+                      <select value={npdLatestDate} onChange={(e) => loadNpdForDates(npdBaselineDate, e.target.value)}
+                        style={{ padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.body, background: '#FFF', cursor: 'pointer' }}>
+                        {npdAvailableDates.filter(d => d !== npdBaselineDate).reverse().map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 )}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <button onClick={() => setViewMode('dashboard')} style={headerBtnStyle}><X size={14} /> Back</button>
               </div>
             </div>

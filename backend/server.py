@@ -599,7 +599,7 @@ async def get_all_history():
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/npd")
-async def get_npd(target_date: str = None):
+async def get_npd(target_date: str = None, baseline_date: str = None, latest_date: str = None):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -617,33 +617,32 @@ async def get_npd(target_date: str = None):
         if len(dates) < 2:
             return {"has_data": False, "latest_date": dates[0] if dates else None, "previous_date": None, "brands": [], "available_dates": dates, "message": "Need at least 2 scrape dates for NPD comparison"}
 
-        latest_date = dates[-1]
+        sel_latest = latest_date if latest_date and latest_date in dates else dates[-1]
+        sel_baseline = baseline_date if baseline_date and baseline_date in dates else (target_date if target_date and target_date in dates else dates[-2])
 
-        if target_date and target_date in dates and target_date != latest_date:
-            compare_date = target_date
-        else:
-            compare_date = dates[-2]
+        if sel_baseline == sel_latest:
+            sel_baseline = dates[-2] if sel_latest == dates[-1] else dates[0]
 
         latest_by_brand = {}
-        compare_by_brand = {}
+        baseline_by_brand = {}
         for scrape in all_scrapes:
-            if scrape["scrape_date"] == latest_date:
+            if scrape["scrape_date"] == sel_latest:
                 latest_by_brand[scrape["brand_name"]] = scrape["items"]
-            elif scrape["scrape_date"] == compare_date:
-                compare_by_brand[scrape["brand_name"]] = scrape["items"]
+            elif scrape["scrape_date"] == sel_baseline:
+                baseline_by_brand[scrape["brand_name"]] = scrape["items"]
 
         brands_npd = []
-        all_brand_names = set(list(latest_by_brand.keys()) + list(compare_by_brand.keys()))
+        all_brand_names = set(list(latest_by_brand.keys()) + list(baseline_by_brand.keys()))
 
         for brand_name in sorted(all_brand_names):
             latest_items = latest_by_brand.get(brand_name, {})
-            compare_items_data = compare_by_brand.get(brand_name, {})
+            baseline_items_data = baseline_by_brand.get(brand_name, {})
 
             latest_keys = set(latest_items.keys())
-            compare_keys = set(compare_items_data.keys())
+            baseline_keys = set(baseline_items_data.keys())
 
-            new_item_names = latest_keys - compare_keys
-            removed_item_names = compare_keys - latest_keys
+            new_item_names = latest_keys - baseline_keys
+            removed_item_names = baseline_keys - latest_keys
 
             if not new_item_names and not removed_item_names:
                 continue
@@ -656,7 +655,7 @@ async def get_npd(target_date: str = None):
 
             removed_items = []
             for name in sorted(removed_item_names):
-                detail = get_item_detail(compare_items_data[name])
+                detail = get_item_detail(baseline_items_data[name])
                 detail["item_name"] = name
                 removed_items.append(detail)
 
@@ -673,8 +672,8 @@ async def get_npd(target_date: str = None):
 
         return {
             "has_data": True,
-            "latest_date": latest_date,
-            "previous_date": compare_date,
+            "latest_date": sel_latest,
+            "previous_date": sel_baseline,
             "brands": brands_npd,
             "total_new": sum(b["new_count"] for b in brands_npd),
             "total_removed": sum(b["removed_count"] for b in brands_npd),
@@ -685,7 +684,7 @@ async def get_npd(target_date: str = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/npd-ai-summary")
-async def get_npd_ai_summary(target_date: str = None):
+async def get_npd_ai_summary(target_date: str = None, baseline_date: str = None, latest_date: str = None):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -700,28 +699,27 @@ async def get_npd_ai_summary(target_date: str = None):
         if len(dates) < 2:
             raise HTTPException(status_code=400, detail="Need at least 2 scrape dates")
 
-        latest_date = dates[-1]
-        if target_date and target_date in dates and target_date != latest_date:
-            compare_date = target_date
-        else:
-            compare_date = dates[-2]
+        sel_latest = latest_date if latest_date and latest_date in dates else dates[-1]
+        sel_baseline = baseline_date if baseline_date and baseline_date in dates else (target_date if target_date and target_date in dates else dates[-2])
+        if sel_baseline == sel_latest:
+            sel_baseline = dates[-2] if sel_latest == dates[-1] else dates[0]
 
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT summary FROM npd_summaries WHERE latest_date = %s AND previous_date = %s LIMIT 1", (latest_date, compare_date))
+            cur.execute("SELECT summary FROM npd_summaries WHERE latest_date = %s AND previous_date = %s LIMIT 1", (sel_latest, sel_baseline))
             cached = cur.fetchone()
             cur.close()
 
         if cached:
-            return {"success": True, "summary": cached["summary"], "latest_date": latest_date, "previous_date": compare_date, "cached": True}
+            return {"success": True, "summary": cached["summary"], "latest_date": sel_latest, "previous_date": sel_baseline, "cached": True}
 
         latest_by_brand = {}
-        compare_by_brand = {}
+        baseline_by_brand = {}
         for scrape in all_scrapes:
-            if scrape["scrape_date"] == latest_date:
+            if scrape["scrape_date"] == sel_latest:
                 latest_by_brand[scrape["brand_name"]] = scrape["items"]
-            elif scrape["scrape_date"] == compare_date:
-                compare_by_brand[scrape["brand_name"]] = scrape["items"]
+            elif scrape["scrape_date"] == sel_baseline:
+                baseline_by_brand[scrape["brand_name"]] = scrape["items"]
 
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -730,9 +728,9 @@ async def get_npd_ai_summary(target_date: str = None):
             cur.close()
 
         npd_data = []
-        for brand_name in set(list(latest_by_brand.keys()) + list(compare_by_brand.keys())):
+        for brand_name in set(list(latest_by_brand.keys()) + list(baseline_by_brand.keys())):
             sel_items = latest_by_brand.get(brand_name, {})
-            cmp_items = compare_by_brand.get(brand_name, {})
+            cmp_items = baseline_by_brand.get(brand_name, {})
             new_names = set(sel_items.keys()) - set(cmp_items.keys())
             removed_names = set(cmp_items.keys()) - set(sel_items.keys())
             if not new_names and not removed_names:
@@ -745,16 +743,16 @@ async def get_npd_ai_summary(target_date: str = None):
             npd_data.append({"brand": brand_name, "is_own_brand": brand_name in own_brands, "new_items": new_details, "removed_items": removed_details})
 
         if not npd_data:
-            return {"success": True, "summary": "No new product changes detected between the two dates.", "latest_date": latest_date, "previous_date": compare_date}
+            return {"success": True, "summary": "No new product changes detected between the two dates.", "latest_date": sel_latest, "previous_date": sel_baseline}
 
-        summary = await generate_npd_ai_summary(latest_date, compare_date, npd_data)
+        summary = await generate_npd_ai_summary(sel_latest, sel_baseline, npd_data)
         if summary:
             with get_db() as conn:
                 cur = conn.cursor()
                 cur.execute("INSERT INTO npd_summaries (latest_date, previous_date, summary, created_at) VALUES (%s, %s, %s, %s)",
-                            (latest_date, compare_date, summary, datetime.now(timezone.utc)))
+                            (sel_latest, sel_baseline, summary, datetime.now(timezone.utc)))
                 cur.close()
-            return {"success": True, "summary": summary, "latest_date": latest_date, "previous_date": compare_date, "cached": False}
+            return {"success": True, "summary": summary, "latest_date": sel_latest, "previous_date": sel_baseline, "cached": False}
         else:
             raise HTTPException(status_code=500, detail="Failed to generate AI summary")
     except HTTPException:
@@ -763,7 +761,7 @@ async def get_npd_ai_summary(target_date: str = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.post("/npd-ai-summary/regenerate")
-async def regenerate_npd_ai_summary_endpoint(target_date: str = None):
+async def regenerate_npd_ai_summary_endpoint(baseline_date: str = None, latest_date: str = None):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -775,18 +773,17 @@ async def regenerate_npd_ai_summary_endpoint(target_date: str = None):
         if len(dates) < 2:
             raise HTTPException(status_code=400, detail="Need at least 2 scrape dates")
 
-        latest_date = dates[-1]
-        if target_date and target_date in dates and target_date != latest_date:
-            compare_date = target_date
-        else:
-            compare_date = dates[-2]
+        sel_latest = latest_date if latest_date and latest_date in dates else dates[-1]
+        sel_baseline = baseline_date if baseline_date and baseline_date in dates else dates[-2]
+        if sel_baseline == sel_latest:
+            sel_baseline = dates[-2] if sel_latest == dates[-1] else dates[0]
 
         with get_db() as conn:
             cur = conn.cursor()
-            cur.execute("DELETE FROM npd_summaries WHERE latest_date = %s AND previous_date = %s", (latest_date, compare_date))
+            cur.execute("DELETE FROM npd_summaries WHERE latest_date = %s AND previous_date = %s", (sel_latest, sel_baseline))
             cur.close()
 
-        return await get_npd_ai_summary(target_date=compare_date)
+        return await get_npd_ai_summary(baseline_date=sel_baseline, latest_date=sel_latest)
     except HTTPException:
         raise
     except Exception as e:
