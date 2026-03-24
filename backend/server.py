@@ -44,14 +44,36 @@ def get_db():
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
+def get_price(item_data) -> float:
+    if isinstance(item_data, dict):
+        return float(item_data.get("price", 0))
+    return float(item_data)
+
+def get_item_detail(item_data) -> dict:
+    if isinstance(item_data, dict):
+        return {
+            "price": float(item_data.get("price", 0)),
+            "original_price": item_data.get("original_price"),
+            "description": item_data.get("description", ""),
+            "category": item_data.get("category", ""),
+            "image_url": item_data.get("image_url", ""),
+        }
+    return {
+        "price": float(item_data),
+        "original_price": None,
+        "description": "",
+        "category": "",
+        "image_url": "",
+    }
+
 class BaselineData(BaseModel):
     brand_name: str
-    items: Dict[str, float]
+    items: Dict[str, Any]
     baseline_date: str = "24-Feb-25"
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class BaselineUpload(BaseModel):
-    brands: Dict[str, Dict[str, float]]
+    brands: Dict[str, Dict[str, Any]]
     baseline_date: str = "24-Feb-25"
 
 class ComparisonStats(BaseModel):
@@ -67,14 +89,14 @@ class DailyScrape(BaseModel):
     model_config = ConfigDict(extra="ignore")
     scrape_date: str
     brand_name: str
-    items: Dict[str, float]
+    items: Dict[str, Any]
     vs_baseline: ComparisonStats
     vs_previous: Optional[ComparisonStats] = None
     uploaded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ScrapeUpload(BaseModel):
     scrape_date: str
-    brands: Dict[str, Dict[str, float]]
+    brands: Dict[str, Dict[str, Any]]
     set_as_baseline: bool = False
 
 class BrandHistoryItem(BaseModel):
@@ -109,7 +131,7 @@ class BrandGroupUpdate(BaseModel):
     group_order: Optional[int] = None
 
 class NewBrandsData(BaseModel):
-    brands: Dict[str, Dict[str, float]]
+    brands: Dict[str, Dict[str, Any]]
 
 SLUG_TO_BRAND = {
     "operation-falafel-downtown-burj-khalifa": "Operational Falafel",
@@ -184,16 +206,17 @@ def parse_apify_items(menu_items: list) -> dict:
             items[name] = use_price
     return items
 
-def compare_items(baseline_items: Dict[str, float], scrape_items: Dict[str, float]) -> ComparisonStats:
+def compare_items(baseline_items: Dict[str, Any], scrape_items: Dict[str, Any]) -> ComparisonStats:
     stats = ComparisonStats()
     baseline_keys = set(baseline_items.keys())
     scrape_keys = set(scrape_items.keys())
     for item_name in scrape_keys:
-        scrape_price = scrape_items[item_name]
-        baseline_price = baseline_items.get(item_name)
-        if baseline_price is None:
+        scrape_price = get_price(scrape_items[item_name])
+        baseline_data = baseline_items.get(item_name)
+        if baseline_data is None:
             stats.new_items += 1
         else:
+            baseline_price = get_price(baseline_data)
             if scrape_price > baseline_price:
                 stats.price_up += 1
             elif scrape_price < baseline_price:
@@ -468,11 +491,12 @@ async def get_items_history(brand_name: str):
 
         items_history = []
         for item_name in sorted(all_items):
-            baseline_price = baseline_items.get(item_name)
+            raw_baseline = baseline_items.get(item_name)
+            baseline_price = get_price(raw_baseline) if raw_baseline is not None else None
             price_history = [{"date": baseline_date, "price": baseline_price}]
             for scrape in scrapes:
-                price = scrape["items"].get(item_name)
-                price_history.append({"date": scrape["scrape_date"], "price": price})
+                raw_price = scrape["items"].get(item_name)
+                price_history.append({"date": scrape["scrape_date"], "price": get_price(raw_price) if raw_price is not None else None})
             items_history.append({
                 "item_name": item_name,
                 "baseline_price": baseline_price,
@@ -571,6 +595,211 @@ async def get_all_history():
             "total_brands": len(set(brand for dd in dates_data.values() for brand in dd["brands"].keys())),
             "own_brands_count": len(own_brands)
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/npd")
+async def get_npd(target_date: str = None):
+    try:
+        with get_db() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT scrape_date, brand_name, items FROM scrapes")
+            all_scrapes = cur.fetchall()
+            cur.execute("SELECT own_brand FROM brand_groups")
+            own_brands = [r["own_brand"] for r in cur.fetchall()]
+            cur.close()
+
+        if not all_scrapes:
+            return {"has_data": False, "latest_date": None, "previous_date": None, "brands": [], "available_dates": []}
+
+        dates = sorted(set(s["scrape_date"] for s in all_scrapes), key=parse_date_for_sorting)
+
+        if len(dates) < 2:
+            return {"has_data": False, "latest_date": dates[0] if dates else None, "previous_date": None, "brands": [], "available_dates": dates, "message": "Need at least 2 scrape dates for NPD comparison"}
+
+        if target_date and target_date in dates:
+            selected_date = target_date
+            selected_idx = dates.index(target_date)
+            if selected_idx == 0:
+                return {"has_data": False, "latest_date": selected_date, "previous_date": None, "brands": [], "available_dates": dates, "message": "No previous date to compare against for this date"}
+            compare_date = dates[selected_idx - 1]
+        else:
+            selected_date = dates[-1]
+            compare_date = dates[-2]
+
+        selected_by_brand = {}
+        compare_by_brand = {}
+        for scrape in all_scrapes:
+            if scrape["scrape_date"] == selected_date:
+                selected_by_brand[scrape["brand_name"]] = scrape["items"]
+            elif scrape["scrape_date"] == compare_date:
+                compare_by_brand[scrape["brand_name"]] = scrape["items"]
+
+        brands_npd = []
+        all_brand_names = set(list(selected_by_brand.keys()) + list(compare_by_brand.keys()))
+
+        for brand_name in sorted(all_brand_names):
+            selected_items = selected_by_brand.get(brand_name, {})
+            compare_items_data = compare_by_brand.get(brand_name, {})
+
+            selected_keys = set(selected_items.keys())
+            compare_keys = set(compare_items_data.keys())
+
+            new_item_names = selected_keys - compare_keys
+            removed_item_names = compare_keys - selected_keys
+
+            if not new_item_names and not removed_item_names:
+                continue
+
+            new_items = []
+            for name in sorted(new_item_names):
+                detail = get_item_detail(selected_items[name])
+                detail["item_name"] = name
+                new_items.append(detail)
+
+            removed_items = []
+            for name in sorted(removed_item_names):
+                detail = get_item_detail(compare_items_data[name])
+                detail["item_name"] = name
+                removed_items.append(detail)
+
+            brands_npd.append({
+                "brand_name": brand_name,
+                "is_own_brand": brand_name in own_brands,
+                "new_items": new_items,
+                "removed_items": removed_items,
+                "new_count": len(new_items),
+                "removed_count": len(removed_items),
+            })
+
+        brands_npd.sort(key=lambda x: (not x["is_own_brand"], -x["new_count"] - x["removed_count"]))
+
+        return {
+            "has_data": True,
+            "latest_date": selected_date,
+            "previous_date": compare_date,
+            "brands": brands_npd,
+            "total_new": sum(b["new_count"] for b in brands_npd),
+            "total_removed": sum(b["removed_count"] for b in brands_npd),
+            "brands_with_changes": len(brands_npd),
+            "available_dates": dates,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/npd-ai-summary")
+async def get_npd_ai_summary(target_date: str = None):
+    try:
+        with get_db() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT scrape_date, brand_name, items FROM scrapes")
+            all_scrapes = cur.fetchall()
+            cur.close()
+
+        if not all_scrapes:
+            raise HTTPException(status_code=404, detail="No scrape data found")
+
+        dates = sorted(set(s["scrape_date"] for s in all_scrapes), key=parse_date_for_sorting)
+        if len(dates) < 2:
+            raise HTTPException(status_code=400, detail="Need at least 2 scrape dates")
+
+        if target_date and target_date in dates:
+            selected_date = target_date
+            selected_idx = dates.index(target_date)
+            if selected_idx == 0:
+                raise HTTPException(status_code=400, detail="No previous date to compare against")
+            compare_date = dates[selected_idx - 1]
+        else:
+            selected_date = dates[-1]
+            compare_date = dates[-2]
+
+        with get_db() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT summary FROM npd_summaries WHERE latest_date = %s AND previous_date = %s LIMIT 1", (selected_date, compare_date))
+            cached = cur.fetchone()
+            cur.close()
+
+        if cached:
+            return {"success": True, "summary": cached["summary"], "latest_date": selected_date, "previous_date": compare_date, "cached": True}
+
+        selected_by_brand = {}
+        compare_by_brand = {}
+        for scrape in all_scrapes:
+            if scrape["scrape_date"] == selected_date:
+                selected_by_brand[scrape["brand_name"]] = scrape["items"]
+            elif scrape["scrape_date"] == compare_date:
+                compare_by_brand[scrape["brand_name"]] = scrape["items"]
+
+        with get_db() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT own_brand FROM brand_groups")
+            own_brands = [r["own_brand"] for r in cur.fetchall()]
+            cur.close()
+
+        npd_data = []
+        for brand_name in set(list(selected_by_brand.keys()) + list(compare_by_brand.keys())):
+            sel_items = selected_by_brand.get(brand_name, {})
+            cmp_items = compare_by_brand.get(brand_name, {})
+            new_names = set(sel_items.keys()) - set(cmp_items.keys())
+            removed_names = set(cmp_items.keys()) - set(sel_items.keys())
+            if not new_names and not removed_names:
+                continue
+            new_details = []
+            for name in new_names:
+                detail = get_item_detail(sel_items[name])
+                new_details.append({"name": name, "price": detail["price"], "category": detail.get("category", ""), "description": detail.get("description", "")[:100]})
+            removed_details = [{"name": name, "price": get_price(cmp_items[name])} for name in removed_names]
+            npd_data.append({"brand": brand_name, "is_own_brand": brand_name in own_brands, "new_items": new_details, "removed_items": removed_details})
+
+        if not npd_data:
+            return {"success": True, "summary": "No new product changes detected between the two dates.", "latest_date": selected_date, "previous_date": compare_date}
+
+        summary = await generate_npd_ai_summary(selected_date, compare_date, npd_data)
+        if summary:
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute("INSERT INTO npd_summaries (latest_date, previous_date, summary, created_at) VALUES (%s, %s, %s, %s)",
+                            (selected_date, compare_date, summary, datetime.now(timezone.utc)))
+                cur.close()
+            return {"success": True, "summary": summary, "latest_date": selected_date, "previous_date": compare_date, "cached": False}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to generate AI summary")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/npd-ai-summary/regenerate")
+async def regenerate_npd_ai_summary_endpoint(target_date: str = None):
+    try:
+        with get_db() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT DISTINCT scrape_date FROM scrapes")
+            all_dates = [r["scrape_date"] for r in cur.fetchall()]
+            cur.close()
+
+        dates = sorted(all_dates, key=parse_date_for_sorting)
+        if len(dates) < 2:
+            raise HTTPException(status_code=400, detail="Need at least 2 scrape dates")
+
+        if target_date and target_date in dates:
+            selected_date = target_date
+            selected_idx = dates.index(target_date)
+            if selected_idx == 0:
+                raise HTTPException(status_code=400, detail="No previous date")
+            compare_date = dates[selected_idx - 1]
+        else:
+            selected_date = dates[-1]
+            compare_date = dates[-2]
+
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM npd_summaries WHERE latest_date = %s AND previous_date = %s", (selected_date, compare_date))
+            cur.close()
+
+        return await get_npd_ai_summary(target_date=selected_date)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -782,6 +1011,53 @@ Keep it professional and data-driven."""
                 return None
     except Exception as e:
         logger.error(f"Error generating AI summary: {e}")
+        return None
+
+async def generate_npd_ai_summary(latest_date: str, previous_date: str, npd_data: list) -> str:
+    try:
+        import httpx
+        api_key = os.environ.get('ANTHROPIC_API_KEY')
+        if not api_key:
+            logger.warning("ANTHROPIC_API_KEY not set, skipping NPD AI summary")
+            return None
+
+        prompt = f"""You are analyzing New Product Development (NPD) data for Talabat UAE restaurant brands.
+
+Comparing menu changes between {previous_date} and {latest_date}:
+
+{json.dumps(npd_data, indent=2)}
+
+Provide a professional brand-level summary covering:
+1. Which brands launched new items and what types of products (combos, healthy options, seasonal items, etc.)
+2. Which brands removed items and possible reasons (seasonal removal, menu optimization, etc.)
+3. Key trends across brands (e.g., focus on value combos, health-conscious additions, premium items)
+4. Separate analysis for own brands vs competitor brands if both have changes
+
+Write in plain text only — do NOT use markdown, asterisks, bold, headers, or any formatting. Just use plain sentences. Keep it concise but insightful — 4-6 sentences max. Focus on strategic insights, not just listing items."""
+
+        async with httpx.AsyncClient() as http_client:
+            response = await http_client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 500,
+                    "messages": [{"role": "user", "content": prompt}]
+                },
+                timeout=30.0
+            )
+            if response.status_code == 200:
+                result = response.json()
+                return result["content"][0]["text"]
+            else:
+                logger.error(f"Claude API error for NPD: {response.status_code} - {response.text}")
+                return None
+    except Exception as e:
+        logger.error(f"Error generating NPD AI summary: {e}")
         return None
 
 @api_router.post("/regenerate-summary/{scrape_date}")
@@ -1014,6 +1290,15 @@ async def startup_event():
                     own_brand TEXT NOT NULL UNIQUE,
                     competitors TEXT[] DEFAULT '{}',
                     group_order INTEGER DEFAULT 0
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS npd_summaries (
+                    id SERIAL PRIMARY KEY,
+                    latest_date TEXT NOT NULL,
+                    previous_date TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_baseline_brand ON baseline(brand_name)")

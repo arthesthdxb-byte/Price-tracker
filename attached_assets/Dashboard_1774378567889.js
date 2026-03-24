@@ -7,8 +7,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { toast } from 'sonner';
 import axios from 'axios';
 
-const API = '/api';
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const API = `${BACKEND_URL}/api`;
 
+/* ============================================================
+   THEME CONSTANTS
+   ============================================================ */
 const T = {
   bg: '#FFFFFF',
   cardBg: '#FFFFFF',
@@ -51,16 +55,22 @@ const generateDateOptions = () => {
   return dates;
 };
 
+/* ============================================================
+   STAT CELL COMPONENT
+   ============================================================ */
 const StatCell = ({ value, color, bg }) => (
   <td className="text-center p-4">
     {value > 0 ? (
       <span className="inline-block px-3 py-1 rounded-full text-sm font-semibold" style={{ backgroundColor: bg, color }}>{value}</span>
     ) : (
-      <span style={{ color: T.noChange }}>&mdash;</span>
+      <span style={{ color: T.noChange }}>—</span>
     )}
   </td>
 );
 
+/* ============================================================
+   KPI CARD COMPONENT
+   ============================================================ */
 const KpiCard = ({ label, value, color }) => (
   <div style={{ background: T.cardBg, borderRadius: T.cardRadius, boxShadow: T.cardShadow, borderLeft: `4px solid ${color}`, padding: '16px 20px' }}>
     <div style={{ color, fontSize: '28px', fontWeight: 700 }}>{value}</div>
@@ -68,6 +78,9 @@ const KpiCard = ({ label, value, color }) => (
   </div>
 );
 
+/* ============================================================
+   NPD ITEM CARD
+   ============================================================ */
 const NpdItemCard = ({ item, type }) => {
   const borderColor = type === 'new' ? T.newItem : T.removed;
   return (
@@ -106,6 +119,9 @@ const NpdItemCard = ({ item, type }) => {
   );
 };
 
+/* ============================================================
+   MAIN DASHBOARD COMPONENT
+   ============================================================ */
 const Dashboard = () => {
   const [hasBaseline, setHasBaseline] = useState(false);
   const [baselineDate, setBaselineDate] = useState('24-Feb-25');
@@ -120,8 +136,8 @@ const Dashboard = () => {
   const [viewMode, setViewMode] = useState('dashboard');
   const [dateOptions] = useState(generateDateOptions());
   const [setAsBaseline, setSetAsBaseline] = useState(false);
-  const [stagedMasterFile, setStagedMasterFile] = useState(null);
-  const [stagedScrapeFiles, setStagedScrapeFiles] = useState(null);
+  const [masterFile, setMasterFile] = useState(null);
+  const [scrapeFiles, setScrapeFiles] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [brandGroups, setBrandGroups] = useState([]);
   const [compareMode, setCompareMode] = useState('baseline');
@@ -134,6 +150,7 @@ const Dashboard = () => {
   const [editingBrand, setEditingBrand] = useState(null);
   const [editCompetitors, setEditCompetitors] = useState('');
   const [expandedSummaries, setExpandedSummaries] = useState({});
+  // NPD state
   const [npdData, setNpdData] = useState(null);
   const [npdSummary, setNpdSummary] = useState(null);
   const [npdLoading, setNpdLoading] = useState(false);
@@ -183,6 +200,9 @@ const Dashboard = () => {
     } catch (error) { toast.error('Error loading comparison'); }
   };
 
+  /* ============================================================
+     EXCEL PARSING — ENRICHED (all 6 columns)
+     ============================================================ */
   const parseExcelFile = (file) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -264,26 +284,29 @@ const Dashboard = () => {
     });
   };
 
+  /* ============================================================
+     UPLOADS
+     ============================================================ */
   const handleMasterUpload = async () => {
-    if (!stagedMasterFile) { toast.error('Please select a master file'); return; }
+    if (!masterFile) { toast.error('Please select a master file'); return; }
     setUploading(true);
     try {
-      const brands = await parseExcelFile(stagedMasterFile);
+      const brands = await parseExcelFile(masterFile);
       const response = await axios.post(`${API}/baseline`, { brands, baseline_date: baselineDate });
       if (response.data.success) {
         toast.success(`Master uploaded — ${response.data.brands_count} brands, ${response.data.items_count} items`);
-        setHasBaseline(true); setShowUploadModal(false); setStagedMasterFile(null);
+        setHasBaseline(true); setShowUploadModal(false); setMasterFile(null);
       }
     } catch (error) { toast.error('Error uploading master file'); }
     setUploading(false);
   };
 
   const handleScrapeUpload = async () => {
-    if (!stagedScrapeFiles || stagedScrapeFiles.length === 0) { toast.error('Please select scrape files'); return; }
+    if (!scrapeFiles || scrapeFiles.length === 0) { toast.error('Please select scrape files'); return; }
     if (!scrapeDate) { toast.error('Please select the scrape date'); return; }
     setUploading(true);
     try {
-      const brands = await parseScrapeFiles(stagedScrapeFiles);
+      const brands = await parseScrapeFiles(scrapeFiles);
       const response = await axios.post(`${API}/scrape`, { scrape_date: scrapeDate, brands, set_as_baseline: setAsBaseline });
       if (response.data.success) {
         let msg = `Scrape uploaded — ${response.data.brands_count} brands analyzed`;
@@ -292,12 +315,15 @@ const Dashboard = () => {
         if (response.data.ai_summary) msg += ' + AI summary';
         toast.success(msg);
         await loadDashboard(); await checkBaseline(); await loadBrandGroups();
-        setScrapeDate(''); setSetAsBaseline(false); setStagedScrapeFiles(null);
+        setScrapeDate(''); setSetAsBaseline(false); setScrapeFiles(null);
       }
     } catch (error) { toast.error(error.response?.data?.detail || 'Error uploading scrape'); }
     setUploading(false);
   };
 
+  /* ============================================================
+     NAVIGATION
+     ============================================================ */
   const viewBrandHistory = async (brandName) => {
     try {
       const response = await axios.get(`${API}/brand-history/${encodeURIComponent(brandName)}`);
@@ -371,6 +397,9 @@ const Dashboard = () => {
     setNpdSummaryLoading(false);
   };
 
+  /* ============================================================
+     BRAND CRUD
+     ============================================================ */
   const handleAddBrandGroup = async () => {
     if (!newBrandOwn.trim()) { toast.error('Enter an own brand name'); return; }
     try {
@@ -397,6 +426,9 @@ const Dashboard = () => {
     } catch (error) { toast.error('Error deleting brand group'); }
   };
 
+  /* ============================================================
+     HELPERS
+     ============================================================ */
   const toggleSummary = (key) => setExpandedSummaries(prev => ({ ...prev, [key]: !prev[key] }));
   const toggleRemovedBrand = (brand) => setExpandedRemovedBrands(prev => ({ ...prev, [brand]: !prev[brand] }));
 
@@ -468,16 +500,23 @@ const Dashboard = () => {
     return '';
   };
 
+  /* ============================================================
+     COMMON STYLES
+     ============================================================ */
   const cardStyle = { background: T.cardBg, borderRadius: T.cardRadius, boxShadow: T.cardShadow, border: `1px solid ${T.border}` };
   const headerBtnStyle = { background: T.cardBg, border: `1px solid ${T.border}`, color: T.primary, borderRadius: '8px', padding: '8px 16px', cursor: 'pointer', fontWeight: 500, fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: 6 };
   const headerBtnAccent = { ...headerBtnStyle, background: T.primary, color: '#FFF', border: `1px solid ${T.primary}` };
   const thStyle = { background: T.tableHeader, color: '#FFFFFF', padding: '12px 16px', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' };
   const tdStyle = { padding: '12px 16px', borderBottom: `1px solid ${T.border}` };
 
+  /* ============================================================
+     NPD TRACKER VIEW
+     ============================================================ */
   if (viewMode === 'npd') {
     return (
       <div style={{ minHeight: '100vh', background: T.bg, padding: 24 }}>
         <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+          {/* Header */}
           <div style={{ ...cardStyle, padding: 24, marginBottom: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
               <div>
@@ -512,12 +551,14 @@ const Dashboard = () => {
             </div>
           ) : (
             <>
+              {/* KPI Cards */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 24 }}>
                 <KpiCard label="New Items Launched" value={npdData.total_new} color={T.newItem} />
                 <KpiCard label="Items Removed" value={npdData.total_removed} color={T.removed} />
                 <KpiCard label="Brands with Changes" value={npdData.brands_with_changes} color={T.primary} />
               </div>
 
+              {/* AI Summary */}
               <div style={{ ...cardStyle, padding: 20, marginBottom: 24 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                   <h3 style={{ margin: 0, color: T.title, fontSize: 16, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -536,6 +577,7 @@ const Dashboard = () => {
                 )}
               </div>
 
+              {/* Brand Sections */}
               {npdData.brands.map((brand, idx) => (
                 <div key={idx} style={{ ...cardStyle, padding: 20, marginBottom: 16 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
@@ -559,6 +601,7 @@ const Dashboard = () => {
                     )}
                   </div>
 
+                  {/* New Items */}
                   {brand.new_items.length > 0 && (
                     <div style={{ marginBottom: 16 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: T.newItem, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -572,6 +615,7 @@ const Dashboard = () => {
                     </div>
                   )}
 
+                  {/* Removed Items — collapsed */}
                   {brand.removed_items.length > 0 && (
                     <div>
                       <button onClick={() => toggleRemovedBrand(brand.brand_name)} style={{
@@ -599,6 +643,9 @@ const Dashboard = () => {
     );
   }
 
+  /* ============================================================
+     ALL HISTORY VIEW
+     ============================================================ */
   if (viewMode === 'all-history' && allHistory) {
     return (
       <div style={{ minHeight: '100vh', background: T.bg, padding: 24 }}>
@@ -665,6 +712,9 @@ const Dashboard = () => {
     );
   }
 
+  /* ============================================================
+     BRAND HISTORY VIEW
+     ============================================================ */
   if (viewMode === 'brand-history' && brandHistory) {
     return (
       <div style={{ minHeight: '100vh', background: T.bg, padding: 24 }}>
@@ -742,6 +792,9 @@ const Dashboard = () => {
     );
   }
 
+  /* ============================================================
+     ITEMS HISTORY VIEW
+     ============================================================ */
   if (viewMode === 'items-history' && itemsHistory) {
     const getFilteredItems = () => {
       if (itemFilter === 'all') return itemsHistory.items;
@@ -816,6 +869,9 @@ const Dashboard = () => {
     );
   }
 
+  /* ============================================================
+     SETUP VIEW
+     ============================================================ */
   if (!hasBaseline || !dashboardData) {
     return (
       <div style={{ minHeight: '100vh', background: T.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
@@ -830,8 +886,8 @@ const Dashboard = () => {
               <p style={{ color: T.label, fontSize: 13, margin: '0 0 16px' }}>Upload the Master Price Tracker xlsx file to set the baseline</p>
               <input type="text" placeholder="Baseline date (e.g., 24-Feb-25)" value={baselineDate} onChange={(e) => setBaselineDate(e.target.value)}
                 style={{ width: '100%', padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, marginBottom: 12, fontSize: 14, color: T.body }} />
-              <input type="file" accept=".xlsx,.xls" onChange={(e) => setStagedMasterFile(e.target.files[0])} style={{ width: '100%', marginBottom: 12 }} />
-              <button onClick={handleMasterUpload} disabled={!stagedMasterFile || uploading} style={{ ...headerBtnAccent, opacity: (!stagedMasterFile || uploading) ? 0.5 : 1, width: '100%', justifyContent: 'center', padding: '10px 16px' }}>
+              <input type="file" accept=".xlsx,.xls" onChange={(e) => setMasterFile(e.target.files[0])} style={{ width: '100%', marginBottom: 12 }} />
+              <button onClick={handleMasterUpload} disabled={!masterFile || uploading} style={{ ...headerBtnAccent, opacity: (!masterFile || uploading) ? 0.5 : 1, width: '100%', justifyContent: 'center', padding: '10px 16px' }}>
                 <Upload size={14} /> {uploading ? 'Uploading...' : 'Upload Master File'}
               </button>
             </div>
@@ -844,8 +900,8 @@ const Dashboard = () => {
                 <SelectTrigger style={{ border: `1px solid ${T.border}`, borderRadius: 8, color: T.body, marginBottom: 12 }}><SelectValue placeholder="Select date" /></SelectTrigger>
                 <SelectContent style={{ background: '#FFF', border: `1px solid ${T.border}`, color: T.body, maxHeight: 300 }}>{dateOptions.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
               </Select>
-              <input type="file" accept=".xlsx,.xls" multiple onChange={(e) => setStagedScrapeFiles(e.target.files)} style={{ width: '100%', marginBottom: 12 }} />
-              <button onClick={handleScrapeUpload} disabled={!stagedScrapeFiles || !scrapeDate || uploading} style={{ ...headerBtnAccent, opacity: (!stagedScrapeFiles || !scrapeDate || uploading) ? 0.5 : 1, width: '100%', justifyContent: 'center', padding: '10px 16px' }}>
+              <input type="file" accept=".xlsx,.xls" multiple onChange={(e) => setScrapeFiles(e.target.files)} style={{ width: '100%', marginBottom: 12 }} />
+              <button onClick={handleScrapeUpload} disabled={!scrapeFiles || !scrapeDate || uploading} style={{ ...headerBtnAccent, opacity: (!scrapeFiles || !scrapeDate || uploading) ? 0.5 : 1, width: '100%', justifyContent: 'center', padding: '10px 16px' }}>
                 <Upload size={14} /> {uploading ? 'Uploading...' : 'Upload Scrape Data'}
               </button>
             </div>
@@ -855,10 +911,14 @@ const Dashboard = () => {
     );
   }
 
+  /* ============================================================
+     MAIN DASHBOARD
+     ============================================================ */
   const summaryTotals = calculateOwnBrandsTotals();
 
   return (
     <div style={{ minHeight: '100vh', background: T.bg, padding: 24 }}>
+      {/* Header */}
       <div style={{ ...cardStyle, padding: 24, marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
           <div>
@@ -867,14 +927,15 @@ const Dashboard = () => {
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button onClick={viewNpdTracker} style={headerBtnAccent}><Package size={14} /> NPD Tracker</button>
-            <button onClick={viewAllHistory} style={headerBtnStyle}><RefreshCw size={14} /> View All History</button>
+            <button onClick={viewAllHistory} style={headerBtnStyle}><RefreshCw size={14} /> All History</button>
             <button onClick={() => setShowManageBrands(true)} style={headerBtnStyle}><Settings size={14} /> Manage Brands</button>
-            <button onClick={() => setShowUploadModal(true)} style={headerBtnAccent}><Upload size={14} /> Upload Data</button>
+            <button onClick={() => setShowUploadModal(true)} style={headerBtnStyle}><Upload size={14} /> Upload Data</button>
             <button onClick={exportResults} style={headerBtnStyle}><Download size={14} /> Export</button>
           </div>
         </div>
       </div>
 
+      {/* Comparison Toggle */}
       <div style={{ ...cardStyle, padding: 16, marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <span style={{ color: T.label, fontSize: 13, fontWeight: 600 }}>Compare:</span>
@@ -899,6 +960,7 @@ const Dashboard = () => {
         </div>
       </div>
 
+      {/* Summary Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16, marginBottom: 24 }}>
         <KpiCard label="Price Up" value={summaryTotals.price_up} color={T.priceUp} />
         <KpiCard label="Price Down" value={summaryTotals.price_down} color={T.priceDown} />
@@ -908,6 +970,7 @@ const Dashboard = () => {
         <KpiCard label="Total Items" value={summaryTotals.total} color={T.primary} />
       </div>
 
+      {/* AI Summary */}
       {dashboardData.brands.some(b => b.latest_data?.ai_summary) && (
         <div style={{ ...cardStyle, marginBottom: 24 }}>
           <button onClick={() => toggleSummary('dashboard')} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 16, background: 'none', border: 'none', cursor: 'pointer' }}>
@@ -923,6 +986,7 @@ const Dashboard = () => {
         </div>
       )}
 
+      {/* Brand Table */}
       <div style={{ ...cardStyle, overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -946,7 +1010,7 @@ const Dashboard = () => {
                 return (
                   <React.Fragment key={`group-${groupIdx}`}>
                     <tr style={{ background: 'rgba(0,107,107,0.04)' }}>
-                      <td style={tdStyle}><span style={{ color: T.primary, marginRight: 4 }}>&#9733;</span><span style={{ fontWeight: 600, color: T.body }}>{group.own}</span></td>
+                      <td style={tdStyle}><span style={{ color: T.primary, marginRight: 4 }}>★</span><span style={{ fontWeight: 600, color: T.body }}>{group.own}</span></td>
                       <td style={{ ...tdStyle, textAlign: 'center' }}><span style={{ display: 'inline-block', padding: '2px 10px', borderRadius: 12, fontSize: 11, fontWeight: 600, background: T.ownBadgeBg, color: T.ownBadgeText }}>OWN</span></td>
                       <StatCell value={ownData.price_up} color={T.priceUp} bg="rgba(229,115,115,0.15)" />
                       <StatCell value={ownData.price_down} color={T.priceDown} bg="rgba(102,187,106,0.15)" />
@@ -982,6 +1046,7 @@ const Dashboard = () => {
         </div>
       </div>
 
+      {/* Upload Modal */}
       {showUploadModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, zIndex: 50 }}>
           <div style={{ ...cardStyle, padding: 24, width: '100%', maxWidth: 600 }}>
@@ -994,8 +1059,8 @@ const Dashboard = () => {
               <p style={{ color: T.label, fontSize: 13, margin: '0 0 12px' }}>Upload a new master file to update the baseline</p>
               <input type="text" placeholder="Baseline date" value={baselineDate} onChange={(e) => setBaselineDate(e.target.value)}
                 style={{ width: '100%', padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, marginBottom: 8, fontSize: 14, color: T.body }} />
-              <input type="file" accept=".xlsx,.xls" onChange={(e) => setStagedMasterFile(e.target.files[0])} style={{ width: '100%', marginBottom: 12 }} />
-              <button onClick={handleMasterUpload} disabled={!stagedMasterFile || uploading} style={{ ...headerBtnAccent, opacity: (!stagedMasterFile || uploading) ? 0.5 : 1, width: '100%', justifyContent: 'center', padding: '10px 16px' }}>
+              <input type="file" accept=".xlsx,.xls" onChange={(e) => setMasterFile(e.target.files[0])} style={{ width: '100%', marginBottom: 12 }} />
+              <button onClick={handleMasterUpload} disabled={!masterFile || uploading} style={{ ...headerBtnAccent, opacity: (!masterFile || uploading) ? 0.5 : 1, width: '100%', justifyContent: 'center', padding: '10px 16px' }}>
                 <Upload size={14} /> {uploading ? 'Uploading...' : 'Upload Master'}
               </button>
             </div>
@@ -1006,18 +1071,21 @@ const Dashboard = () => {
                 <SelectTrigger style={{ border: `1px solid ${T.border}`, borderRadius: 8, color: T.body, marginBottom: 8 }}><SelectValue placeholder="Select date" /></SelectTrigger>
                 <SelectContent style={{ background: '#FFF', border: `1px solid ${T.border}`, color: T.body, maxHeight: 300 }}>{dateOptions.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
               </Select>
-              <input type="file" accept=".xlsx,.xls" multiple onChange={(e) => setStagedScrapeFiles(e.target.files)} style={{ width: '100%', marginBottom: 8 }} />
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: T.label, fontSize: 13, marginBottom: 12, cursor: 'pointer' }}>
-                <input type="checkbox" checked={setAsBaseline} onChange={(e) => setSetAsBaseline(e.target.checked)} /> Set as new baseline
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12, background: 'rgba(255,167,38,0.1)', border: `1px solid rgba(255,167,38,0.3)`, borderRadius: 8, marginBottom: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={setAsBaseline} onChange={(e) => setSetAsBaseline(e.target.checked)} style={{ width: 16, height: 16 }} />
+                <span style={{ color: T.removed, fontSize: 13, fontWeight: 500 }}>Also update baseline with this data</span>
               </label>
-              <button onClick={handleScrapeUpload} disabled={!stagedScrapeFiles || !scrapeDate || uploading} style={{ ...headerBtnAccent, opacity: (!stagedScrapeFiles || !scrapeDate || uploading) ? 0.5 : 1, width: '100%', justifyContent: 'center', padding: '10px 16px' }}>
-                <Upload size={14} /> {uploading ? 'Uploading...' : 'Upload Scrape'}
+              {setAsBaseline && <p style={{ color: T.removed, fontSize: 12, margin: '0 0 8px' }}>This will replace the current baseline.</p>}
+              <input type="file" accept=".xlsx,.xls" multiple onChange={(e) => setScrapeFiles(e.target.files)} style={{ width: '100%', marginBottom: 12 }} />
+              <button onClick={handleScrapeUpload} disabled={!scrapeFiles || !scrapeDate || uploading} style={{ ...headerBtnAccent, opacity: (!scrapeFiles || !scrapeDate || uploading) ? 0.5 : 1, width: '100%', justifyContent: 'center', padding: '10px 16px' }}>
+                <Upload size={14} /> {uploading ? 'Uploading...' : `Upload ${scrapeFiles ? scrapeFiles.length : 0} Scrape Files`}
               </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* Manage Brands Modal */}
       {showManageBrands && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, zIndex: 50 }}>
           <div style={{ ...cardStyle, padding: 24, width: '100%', maxWidth: 700, maxHeight: '80vh', overflowY: 'auto' }}>
@@ -1025,42 +1093,43 @@ const Dashboard = () => {
               <h2 style={{ fontSize: 20, fontWeight: 700, color: T.title, margin: 0 }}>Manage Brand Groups</h2>
               <button onClick={() => setShowManageBrands(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.label }}><X size={20} /></button>
             </div>
-            <div style={{ marginBottom: 20, padding: 16, background: T.tableAltRow, borderRadius: 10 }}>
-              <h3 style={{ color: T.title, fontWeight: 600, fontSize: 15, margin: '0 0 12px' }}>Add New Brand Group</h3>
-              <input type="text" placeholder="Own brand name" value={newBrandOwn} onChange={(e) => setNewBrandOwn(e.target.value)}
+            <div style={{ padding: 16, background: T.tableAltRow, borderRadius: 10, marginBottom: 20 }}>
+              <h3 style={{ color: T.primary, fontWeight: 600, fontSize: 14, margin: '0 0 12px' }}>Add New Brand Group</h3>
+              <input type="text" placeholder="Own brand name (e.g., Shake Shack)" value={newBrandOwn} onChange={(e) => setNewBrandOwn(e.target.value)}
                 style={{ width: '100%', padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, marginBottom: 8, fontSize: 14, color: T.body }} />
               <input type="text" placeholder="Competitors (comma-separated)" value={newBrandCompetitors} onChange={(e) => setNewBrandCompetitors(e.target.value)}
                 style={{ width: '100%', padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, marginBottom: 8, fontSize: 14, color: T.body }} />
-              <button onClick={handleAddBrandGroup} style={{ ...headerBtnAccent, padding: '8px 16px' }}><Plus size={14} /> Add Group</button>
+              <button onClick={handleAddBrandGroup} style={headerBtnAccent}><Plus size={14} /> Add Brand Group</button>
             </div>
-            {brandGroups.map((group, idx) => (
-              <div key={idx} style={{ ...cardStyle, padding: 16, marginBottom: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div>
-                    <span style={{ fontWeight: 600, color: T.body }}>{group.own}</span>
-                    <span style={{ marginLeft: 8, fontSize: 11, padding: '2px 10px', borderRadius: 12, background: T.ownBadgeBg, color: T.ownBadgeText, fontWeight: 600 }}>OWN</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {brandGroups.map((group, idx) => (
+                <div key={idx} style={{ padding: 16, background: T.tableAltRow, borderRadius: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span style={{ fontWeight: 600, color: T.body, display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ color: T.primary }}>★</span> {group.own}</span>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {editingBrand === group.own ? (
+                        <button onClick={() => handleUpdateBrandGroup(group.own)} style={{ ...headerBtnAccent, padding: '4px 10px', fontSize: 12 }}><Save size={12} /> Save</button>
+                      ) : (
+                        <button onClick={() => { setEditingBrand(group.own); setEditCompetitors(group.competitors.join(', ')); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.removed }}><Edit2 size={14} /></button>
+                      )}
+                      <button onClick={() => handleDeleteBrandGroup(group.own)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.priceUp }}><Trash2 size={14} /></button>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    <button onClick={() => { setEditingBrand(group.own); setEditCompetitors(group.competitors.join(', ')); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.primary }}><Edit2 size={14} /></button>
-                    <button onClick={() => handleDeleteBrandGroup(group.own)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.priceUp }}><Trash2 size={14} /></button>
-                  </div>
-                </div>
-                {editingBrand === group.own ? (
-                  <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                  {editingBrand === group.own ? (
                     <input type="text" value={editCompetitors} onChange={(e) => setEditCompetitors(e.target.value)}
-                      style={{ flex: 1, padding: '6px 10px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.body }} />
-                    <button onClick={() => handleUpdateBrandGroup(group.own)} style={{ ...headerBtnAccent, padding: '6px 12px', fontSize: 12 }}><Save size={12} /> Save</button>
-                  </div>
-                ) : (
-                  <div style={{ marginTop: 4, color: T.label, fontSize: 13 }}>
-                    {group.competitors.length > 0 ? group.competitors.join(', ') : 'No competitors'}
-                  </div>
-                )}
-              </div>
-            ))}
+                      style={{ width: '100%', padding: '6px 10px', border: `1px solid ${T.border}`, borderRadius: 6, fontSize: 13, color: T.body }}
+                      placeholder="Competitors (comma-separated)" />
+                  ) : (
+                    <div style={{ color: T.label, fontSize: 13 }}>{group.competitors.length > 0 ? group.competitors.join(' | ') : 'No competitors'}</div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
+
+      <div style={{ textAlign: 'center', marginTop: 24, color: T.label, fontSize: 12 }}>COMPETITIVE PRICING INTELLIGENCE | TALABAT UAE</div>
     </div>
   );
 };

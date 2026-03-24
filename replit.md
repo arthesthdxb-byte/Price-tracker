@@ -27,11 +27,12 @@ backend/           # Python FastAPI backend
 - **baseline**: Stores baseline price data per brand (brand_name, items JSONB, baseline_date)
 - **scrapes**: Stores daily scrape data with comparisons (scrape_date, brand_name, items JSONB, vs_baseline JSONB, vs_previous JSONB, ai_summary)
 - **brand_groups**: Stores brand groupings (own_brand, competitors TEXT[], group_order)
+- **npd_summaries**: Caches AI-generated NPD summaries by date pair (latest_date, previous_date, summary, created_at)
 
 ## Development
 - Frontend runs on port 5000 (webview workflow)
 - Backend API runs on port 8000 (console workflow)
-- Frontend connects to backend via `REACT_APP_BACKEND_URL` env var
+- Frontend connects to backend via relative `/api` path (proxied to localhost:8000 in dev via craco.config.js)
 
 ## Key Features
 - Upload baseline pricing data from Excel files
@@ -40,11 +41,13 @@ backend/           # Python FastAPI backend
 - Historical price trend analysis
 - AI-generated summaries (requires ANTHROPIC_API_KEY)
 - Excel export of comparison results
-- Server-side Excel upload endpoint at POST /api/upload-excel
+- NPD (New Product Development) Tracker: identifies newly launched and removed menu items between consecutive scrape dates, with AI-powered summaries
+- Enriched item format support: items can be float OR dict with price, original_price, description, category, image_url (use get_price()/get_item_detail() helpers)
+- Apify webhook integration for automated scrape data ingestion
 
 ## Environment Variables
 - `DATABASE_URL`: PostgreSQL connection string (auto-set by Replit)
-- `REACT_APP_BACKEND_URL`: Backend URL for frontend API calls
+- `APIFY_TOKEN`: Required for Apify webhook automated scrape ingestion
 - `ANTHROPIC_API_KEY`: Optional, for AI summary generation
 - `CORS_ORIGINS`: Optional, comma-separated allowed origins
 
