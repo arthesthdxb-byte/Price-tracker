@@ -536,14 +536,12 @@ const Dashboard = () => {
           ) : (
             <>
               {(() => {
+                const ownBrandNames = brandGroups.map(g => g.own);
+                const compBrandNames = brandGroups.flatMap(g => g.competitors);
                 const filteredNpdBrands = npdData.brands.filter(b => {
                   if (npdBrandFilter === 'all') return true;
-                  if (npdBrandFilter.startsWith('own:')) {
-                    const ownName = npdBrandFilter.slice(4);
-                    const group = brandGroups.find(g => g.own === ownName);
-                    if (!group) return b.brand_name === ownName;
-                    return b.brand_name === ownName || group.competitors.includes(b.brand_name);
-                  }
+                  if (npdBrandFilter === 'only_own') return ownBrandNames.includes(b.brand_name);
+                  if (npdBrandFilter === 'only_comp') return compBrandNames.includes(b.brand_name);
                   return b.brand_name === npdBrandFilter;
                 });
                 const filteredNew = filteredNpdBrands.reduce((s, b) => s + b.new_count, 0);
@@ -553,17 +551,20 @@ const Dashboard = () => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 13, color: T.label, fontWeight: 600 }}>Brand:</span>
                   <select value={npdBrandFilter} onChange={(e) => setNpdBrandFilter(e.target.value)}
-                    style={{ padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.body, background: '#FFF', cursor: 'pointer', minWidth: 200 }}>
+                    style={{ padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.body, background: '#FFF', cursor: 'pointer', minWidth: 220 }}>
                     <option value="all">All Brands</option>
-                    {brandGroups.map((g, idx) => (
-                      <React.Fragment key={`g-${idx}`}>
-                        <option value={`own:${g.own}`}>⭐ {g.own} + Competitors</option>
-                        <option value={g.own}>&nbsp;&nbsp;&nbsp;&nbsp;{g.own} (OWN only)</option>
-                        {g.competitors.map(c => (
-                          <option key={c} value={c}>&nbsp;&nbsp;&nbsp;&nbsp;{c}</option>
-                        ))}
-                      </React.Fragment>
-                    ))}
+                    <option value="only_own">Only Own Brands</option>
+                    <option value="only_comp">Only Competitors</option>
+                    <optgroup label="Own Brands">
+                      {brandGroups.map(g => (
+                        <option key={`own-${g.own}`} value={g.own}>{g.own}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Competitors">
+                      {brandGroups.flatMap(g => g.competitors).map(c => (
+                        <option key={`comp-${c}`} value={c}>{c}</option>
+                      ))}
+                    </optgroup>
                   </select>
                 </div>
               </div>
