@@ -749,7 +749,9 @@ async def get_npd_ai_summary(target_date: str = None, baseline_date: str = None,
         if summary:
             with get_db() as conn:
                 cur = conn.cursor()
-                cur.execute("INSERT INTO npd_summaries (latest_date, previous_date, summary, created_at) VALUES (%s, %s, %s, %s)",
+                cur.execute("""INSERT INTO npd_summaries (latest_date, previous_date, summary, created_at) 
+                                VALUES (%s, %s, %s, %s)
+                                ON CONFLICT (latest_date, previous_date) DO UPDATE SET summary = EXCLUDED.summary, created_at = EXCLUDED.created_at""",
                             (sel_latest, sel_baseline, summary, datetime.now(timezone.utc)))
                 cur.close()
             return {"success": True, "summary": summary, "latest_date": sel_latest, "previous_date": sel_baseline, "cached": False}
@@ -1284,7 +1286,8 @@ async def startup_event():
                     latest_date TEXT NOT NULL,
                     previous_date TEXT NOT NULL,
                     summary TEXT NOT NULL,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    UNIQUE(latest_date, previous_date)
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_baseline_brand ON baseline(brand_name)")
