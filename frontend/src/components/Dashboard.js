@@ -333,15 +333,17 @@ const Dashboard = () => {
     setNpdLoading(true);
     setNpdSummary(null);
     try {
-      const response = await axios.get(`${API}/npd`);
+      const defaultBaseline = '12-Mar-26';
+      const response = await axios.get(`${API}/npd${npdQueryParams(defaultBaseline, '')}`);
       setNpdData(response.data);
       setNpdAvailableDates(response.data.available_dates || []);
       if (response.data.has_data) {
-        setNpdBaselineDate(response.data.previous_date || '');
+        setNpdBaselineDate(defaultBaseline);
         setNpdLatestDate(response.data.latest_date || '');
+        const lt = response.data.latest_date || '';
         setNpdSummaryLoading(true);
         try {
-          const summaryRes = await axios.get(`${API}/npd-ai-summary`);
+          const summaryRes = await axios.get(`${API}/npd-ai-summary${npdQueryParams(defaultBaseline, lt)}`);
           setNpdSummary(summaryRes.data.summary);
         } catch (err) { console.error('Error loading NPD summary:', err); }
         setNpdSummaryLoading(false);
