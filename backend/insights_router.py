@@ -298,24 +298,28 @@ STORED_CAT_NORMALIZE = {
     "jones snacks": "Sides & Appetizers",
 }
 
+PROMO_SEASONAL_CATEGORIES = {
+    "offers", "deals", "special offers", "combos",
+    "celebration combos", "combo meals", "bundle meals", "bundles",
+    "value meal box", "build your own bundle",
+    "bundle meals (11am to 4pm)",
+    "easter 2026", "ramadan specials", "lent menu",
+    "promotions", "new arrivals!", "new additions",
+    "hut signatures", "nonna's lunch deal",
+    "nonna's signature pastas [new]",
+    "the vegan menu", "creations by chef omar",
+}
+
 IGNORED_CATEGORIES = {
-    "offers", "deals", "special offers", "combos", "new additions",
-    "new additions", "celebration combos",
     "picks for you", "picks for you 🏷", "picks for you",
     "al qilabat", "daily al bahriaat",
     "yemeni kitchen meat", "yemeni kitchen chicken",
     "go healthy with fadi el khatib healthy items",
     "fuel first- keto collection", "talabat exclusive",
     "new wraps", "mini z", "flaming wraps", "add on's",
-    "promotions", "featured", "popular", "top picks",
+    "featured", "popular", "top picks",
     "coffee", "dips",
-    "value meal box", "build your own bundle",
-    "combo meals", "bundle meals", "bundles",
-    "nonna's lunch deal", "nonna's signature pastas [new]",
-    "bundle meals (11am to 4pm)", "hut signatures",
-    "easter 2026", "ramadan specials",
-    "creations by chef omar", "fatat", "the gathering box_",
-    "the vegan menu", "lent menu", "new arrivals!",
+    "fatat", "the gathering box_",
     "chillixirs",
 }
 
@@ -327,6 +331,8 @@ def _normalize_stored_category(cat: str) -> str:
     cat_lower = cat_clean.lower()
     if cat_lower in IGNORED_CATEGORIES:
         return "Other"
+    if cat_lower in PROMO_SEASONAL_CATEGORIES:
+        return "Promotions & Seasonal"
     if cat_lower in STORED_CAT_NORMALIZE:
         return STORED_CAT_NORMALIZE[cat_lower]
     for pattern, category in CATEGORY_COMPILED:
@@ -836,10 +842,22 @@ async def menu_gap_analysis(scrape_date: str = None):
                     "depth_gaps": depth_gaps,
                 })
 
-            # Aggregate: categories that ANY competitor has but own brand doesn't
             all_missing = all_comp_cats - own_cat_set - {"Other", "Add-ons & Extras"}
+            menu_missing = sorted([c for c in all_missing if c != "Promotions & Seasonal"])
+            promo_missing = "Promotions & Seasonal" in all_missing and "Promotions & Seasonal" not in own_cat_set
 
-            total_category_gaps += len(all_missing)
+            promo_details = []
+            if promo_missing:
+                for ca in comp_analyses:
+                    promo_cat = ca.get("categories", {}).get("Promotions & Seasonal")
+                    if promo_cat:
+                        promo_details.append({
+                            "brand": ca["brand_name"],
+                            "count": promo_cat["count"],
+                            "items": [i["name"] for i in promo_cat["items"][:6]],
+                        })
+
+            total_category_gaps += len(menu_missing)
             total_price_gaps += sum(len(ca["price_gaps"]) for ca in comp_analyses)
 
             group_results.append({
@@ -848,7 +866,9 @@ async def menu_gap_analysis(scrape_date: str = None):
                 "own_categories": own_cats,
                 "own_price_distribution": own_dist,
                 "own_category_count": len(own_cat_set),
-                "all_missing_categories": sorted(all_missing),
+                "all_missing_categories": menu_missing,
+                "promo_gap": promo_missing,
+                "promo_details": promo_details,
                 "competitors": comp_analyses,
                 "group_order": group["group_order"],
             })
@@ -860,6 +880,7 @@ async def menu_gap_analysis(scrape_date: str = None):
             "summary": {
                 "total_category_gaps": total_category_gaps,
                 "total_price_gaps": total_price_gaps,
+                "promo_gaps": sum(1 for g in group_results if g.get("promo_gap")),
                 "groups_analyzed": len(group_results),
             },
             "groups": group_results,

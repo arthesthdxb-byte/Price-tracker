@@ -422,9 +422,10 @@ export const MenuGapAnalyzerView = ({ onBack }) => {
         </div>
 
         {/* KPIs */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
           <KpiCard label="Category Gaps Found" value={data.summary.total_category_gaps} color={T.priceUp} icon={AlertTriangle} />
           <KpiCard label="Price Range Gaps" value={data.summary.total_price_gaps} color={T.removed} icon={DollarSign} />
+          <KpiCard label="Promo / Seasonal Gaps" value={data.summary.promo_gaps || 0} color="#FF9800" icon={TrendingUp} />
           <KpiCard label="Brand Groups Analyzed" value={data.summary.groups_analyzed} color={T.primary} icon={Layers} />
         </div>
 
@@ -440,7 +441,8 @@ export const MenuGapAnalyzerView = ({ onBack }) => {
         {data.groups.map((group) => {
           const isExpanded = expandedGroup === group.own_brand;
           const hasMissingCats = group.all_missing_categories.length > 0;
-          const hasAnyGaps = hasMissingCats || group.competitors.some(c => c.price_gaps.length > 0 || c.depth_gaps.length > 0);
+          const hasPromoGap = group.promo_gap;
+          const hasAnyGaps = hasMissingCats || hasPromoGap || group.competitors.some(c => c.price_gaps.length > 0 || c.depth_gaps.length > 0);
 
           return (
             <div key={group.own_brand} style={{ ...cardStyle, padding: 20, marginBottom: 16 }}>
@@ -457,6 +459,9 @@ export const MenuGapAnalyzerView = ({ onBack }) => {
                   {hasMissingCats && (
                     <Badge text={`${group.all_missing_categories.length} missing cats`} bg="rgba(229,115,115,0.15)" color={T.priceUp} />
                   )}
+                  {hasPromoGap && (
+                    <Badge text="Promo gap" bg="rgba(255,152,0,0.15)" color="#E65100" />
+                  )}
                   {!hasAnyGaps && <Badge text="No gaps" bg={T.accentBg} color={T.primary} />}
                 </div>
                 {isExpanded ? <ChevronDown size={18} color={T.label} /> : <ChevronRight size={18} color={T.label} />}
@@ -469,6 +474,24 @@ export const MenuGapAnalyzerView = ({ onBack }) => {
                   {group.all_missing_categories.map(cat => (
                     <Badge key={cat} text={cat} bg="rgba(229,115,115,0.1)" color={T.priceUp} />
                   ))}
+                </div>
+              )}
+
+              {/* Promo / Seasonal gap alert */}
+              {hasPromoGap && group.promo_details && group.promo_details.length > 0 && (
+                <div style={{ marginTop: 12, padding: '12px 16px', background: 'rgba(255,152,0,0.08)', borderRadius: 10, borderLeft: '3px solid #FF9800' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#E65100', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <TrendingUp size={14} /> Competitors running promotions you don't have
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {group.promo_details.map((pd, i) => (
+                      <div key={i} style={{ fontSize: 12, color: T.body, lineHeight: 1.5 }}>
+                        <span style={{ fontWeight: 600, color: '#E65100' }}>{pd.brand}</span>
+                        <span style={{ color: T.label }}> — {pd.count} promo items: </span>
+                        <span style={{ color: T.body }}>{pd.items.join(', ')}{pd.count > pd.items.length ? ` +${pd.count - pd.items.length} more` : ''}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
