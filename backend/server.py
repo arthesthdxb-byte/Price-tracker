@@ -1329,6 +1329,9 @@ async def startup_event():
 
             cur.execute("SELECT COUNT(*) FROM baseline")
             baseline_count = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM scrapes WHERE vs_baseline IS NOT NULL AND vs_baseline::text != '{}' AND vs_baseline::text != 'null'")
+            computed_count = cur.fetchone()[0]
+            needs_recompute = baseline_count > 0 and computed_count == 0
             if baseline_count == 0:
                 seed_file = ROOT_DIR / "seed_data.json"
                 if seed_file.exists():
@@ -1349,6 +1352,32 @@ async def startup_event():
                                     (r["own_brand"], comps, r["group_order"]))
                     conn.commit()
                     logger.info(f"Seeded {len(seed.get('baseline', []))} baseline, {len(seed.get('scrapes', []))} scrapes, {len(seed.get('brand_groups', []))} brand groups")
+
+                    logger.info("Recomputing vs_baseline and vs_previous for seeded scrapes...")
+                    cur2 = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                    cur2.execute("SELECT brand_name, items FROM baseline")
+                    baseline_map = {r["brand_name"]: r["items"] for r in cur2.fetchall()}
+                    cur2.execute("SELECT id, scrape_date, brand_name, items FROM scrapes ORDER BY brand_name")
+                    all_scrapes_list = cur2.fetchall()
+                    cur2.close()
+
+                    scrapes_by_brand = {}
+                    for s in all_scrapes_list:
+                        scrapes_by_brand.setdefault(s["brand_name"], []).append(s)
+                    for brand_name, brand_scrapes in scrapes_by_brand.items():
+                        brand_scrapes.sort(key=lambda x: parse_date_for_sorting(x["scrape_date"]))
+                        bl_items = baseline_map.get(brand_name, {})
+                        prev_items = bl_items
+                        for s in brand_scrapes:
+                            vs_bl = compare_items(bl_items, s["items"])
+                            vs_prev = compare_items(prev_items, s["items"])
+                            cur3 = conn.cursor()
+                            cur3.execute("UPDATE scrapes SET vs_baseline = %s, vs_previous = %s WHERE id = %s",
+                                         (_json.dumps(vs_bl.model_dump()), _json.dumps(vs_prev.model_dump()), s["id"]))
+                            cur3.close()
+                            prev_items = s["items"]
+                    conn.commit()
+                    logger.info("Recomputation complete")
                 else:
                     cur.execute("SELECT COUNT(*) FROM brand_groups")
                     bg_count = cur.fetchone()[0]
@@ -1374,6 +1403,33 @@ async def startup_event():
                                         (own_brand, competitors, order))
                         conn.commit()
                         logger.info(f"Initialized {len(initial_groups)} brand groups")
+            if needs_recompute:
+                import json as _json2
+                logger.info("Recomputing vs_baseline and vs_previous for existing scrapes...")
+                cur4 = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur4.execute("SELECT brand_name, items FROM baseline")
+                baseline_map = {r["brand_name"]: r["items"] for r in cur4.fetchall()}
+                cur4.execute("SELECT id, scrape_date, brand_name, items FROM scrapes ORDER BY brand_name")
+                all_scrapes_list = cur4.fetchall()
+                cur4.close()
+
+                scrapes_by_brand = {}
+                for s in all_scrapes_list:
+                    scrapes_by_brand.setdefault(s["brand_name"], []).append(s)
+                for brand_name, brand_scrapes in scrapes_by_brand.items():
+                    brand_scrapes.sort(key=lambda x: parse_date_for_sorting(x["scrape_date"]))
+                    bl_items = baseline_map.get(brand_name, {})
+                    prev_items = bl_items
+                    for s in brand_scrapes:
+                        vs_bl = compare_items(bl_items, s["items"])
+                        vs_prev = compare_items(prev_items, s["items"])
+                        cur5 = conn.cursor()
+                        cur5.execute("UPDATE scrapes SET vs_baseline = %s, vs_previous = %s WHERE id = %s",
+                                     (_json2.dumps(vs_bl.model_dump()), _json2.dumps(vs_prev.model_dump()), s["id"]))
+                        cur5.close()
+                        prev_items = s["items"]
+                conn.commit()
+                logger.info("Recomputation complete")
             cur.close()
     except Exception as e:
         logger.error(f"Error initializing brand groups: {e}")
