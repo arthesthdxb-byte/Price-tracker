@@ -1156,6 +1156,79 @@ async def upload_excel(file: UploadFile = File(...), upload_type: str = "baselin
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@api_router.get("/apify-pull")
+async def apify_pull(dataset_id: str = None, token: str = None, run_id: str = None):
+    """GET-based Apify data pull — use this as the webhook URL to avoid Cloudflare blocks.
+    URL: /api/apify-pull?token=YOUR_APIFY_TOKEN&dataset_id=DATASET_ID
+    Or for latest run: /api/apify-pull?token=YOUR_APIFY_TOKEN
+    """
+    try:
+        apify_token = os.environ.get("APIFY_TOKEN")
+        if not apify_token:
+            raise HTTPException(status_code=500, detail="APIFY_TOKEN not configured")
+        if token != apify_token:
+            raise HTTPException(status_code=403, detail="Invalid token")
+
+        import httpx
+        async with httpx.AsyncClient() as http_client:
+            if not dataset_id:
+                raise HTTPException(status_code=400, detail="dataset_id parameter required")
+
+            dataset_url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?token={apify_token}&format=json"
+            resp = await http_client.get(dataset_url, timeout=60.0)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=502, detail=f"Apify API returned {resp.status_code}")
+            jsonl_records = resp.json()
+
+        now = datetime.now(timezone.utc)
+        scrape_date = now.strftime("%-d-%b-%y").replace("-0", "-")
+        logger.info(f"[Apify Pull] Fetched {len(jsonl_records)} records from dataset {dataset_id}")
+
+        brands = {}
+        unmatched_slugs = []
+        skipped_empty = []
+
+        for record in jsonl_records:
+            url = record.get("url", "")
+            slug = extract_slug(url)
+            menu_items = record.get("menuItems", [])
+            if not menu_items:
+                skipped_empty.append(slug)
+                continue
+            brand_name = SLUG_TO_BRAND.get(slug)
+            if not brand_name:
+                unmatched_slugs.append(slug)
+                logger.warning(f"[Apify] Unmatched slug: {slug}")
+                continue
+            items = parse_apify_items(menu_items)
+            if items:
+                if brand_name in brands:
+                    brands[brand_name].update(items)
+                else:
+                    brands[brand_name] = items
+
+        if not brands:
+            return {"success": False, "error": "No valid brands parsed", "unmatched_slugs": unmatched_slugs}
+
+        scrape_payload = ScrapeUpload(scrape_date=scrape_date, brands=brands, set_as_baseline=False)
+        result = await upload_scrape(scrape_payload)
+
+        return {
+            "success": True,
+            "scrape_date": scrape_date,
+            "brands_parsed": len(brands),
+            "total_items": sum(len(v) for v in brands.values()),
+            "unmatched_slugs": unmatched_slugs,
+            "skipped_empty": skipped_empty,
+            "scrape_result": result
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Apify Pull] Error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @api_router.post("/apify-webhook")
 async def apify_webhook(request: Request):
     try:
