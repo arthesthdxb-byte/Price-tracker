@@ -92,16 +92,18 @@ def parse_date_for_sorting(date_str: str) -> datetime:
 
 # ── Combo detection ──
 COMBO_KEYWORDS = [
-    r'\bcombo\b', r'\bmeal\b', r'\bdeal\b', r'\boffer\b', r'\bbundle\b',
-    r'\bbox\b', r'\bfeast\b', r'\bplatter\b', r'\bsharing\b', r'\bfamily\b',
+    r'\bcombo\b', r'\bmeal\s+deal\b', r'\bmeal\s+for\b', r'\bbundle\b',
+    r'\bfeast\b', r'\bplatter\b', r'\bsharing\b', r'\bfamily\s+meal\b',
     r'\bfor\s*2\b', r'\bfor\s*two\b', r'\bfor\s*3\b', r'\bfor\s*4\b',
-    r'\bvalue\b', r'\bbucket\b', r'\bsaver\b', r'\bspecial\b',
-    r'\bset\b', r'\bgroup\b', r'\bpersons?\b',
+    r'\bbucket\b', r'\bsaver\b', r'\bpersons?\s+meal\b',
+    r'\bmeal\s+box\b', r'\bvalue\s+meal\b', r'\bcombo\s+meal\b',
+    r'\bfamily\s+box\b', r'\bgroup\s+meal\b', r'\bparty\s+pack\b',
 ]
 COMBO_PATTERN = re.compile('|'.join(COMBO_KEYWORDS), re.IGNORECASE)
 
 def is_combo(item_name: str, description: str = "") -> bool:
-    return bool(COMBO_PATTERN.search(item_name) or COMBO_PATTERN.search(description))
+    combined = f"{item_name} {description}".lower()
+    return bool(COMBO_PATTERN.search(combined))
 
 
 # ── Category inference ──
@@ -229,7 +231,7 @@ def _analyze_price_tiers(combos: list) -> dict:
 
 
 def _find_price_gaps(own_tiers: dict, comp_tiers_list: list) -> list:
-    """Find price ranges where competitors have combos but own brand doesn't."""
+    """Find price ranges where competitors have more combos than own brand."""
     gaps = []
     for tier_key in ["0-19", "20-29", "30-39", "40-49", "50+"]:
         label = f"{tier_key} AED"
@@ -239,15 +241,9 @@ def _find_price_gaps(own_tiers: dict, comp_tiers_list: list) -> list:
         if own_count == 0 and comp_total > 0:
             gaps.append({"tier": label, "tier_key": tier_key, "type": "missing",
                          "detail": f"Competitors have {comp_total} combos here, you have none"})
-        elif own_count > 0 and comp_total > 0:
-            own_avg = own_tiers[tier_key]["avg"]
-            comp_avgs = [ct[tier_key]["avg"] for ct in comp_tiers_list if ct.get(tier_key, {}).get("count", 0) > 0]
-            if comp_avgs:
-                avg_comp = sum(comp_avgs) / len(comp_avgs)
-                diff_pct = round((own_avg - avg_comp) / avg_comp * 100, 1) if avg_comp else 0
-                if abs(diff_pct) > 10:
-                    gaps.append({"tier": label, "tier_key": tier_key, "type": "pricing",
-                                 "detail": f"Your avg {own_avg} AED vs competitor avg {round(avg_comp, 2)} AED ({'+' if diff_pct > 0 else ''}{diff_pct}%)"})
+        elif own_count > 0 and comp_total > 0 and comp_total > own_count * 2:
+            gaps.append({"tier": label, "tier_key": tier_key, "type": "fewer",
+                         "detail": f"You have {own_count} combos vs competitors' {comp_total} combos"})
     return gaps
 
 
@@ -406,14 +402,13 @@ async def combo_ai_insights(scrape_date: str = None, force: bool = False):
 
 {chr(10).join(brand_blocks)}
 
-For EACH own brand, give 2-3 sentences of specific insight covering:
-- What TYPE of combos competitors offer that this brand is missing (e.g. family boxes, dessert bundles, protein combos, sharing platters, build-your-own, value meals for 1)
-- What specific items or bundling patterns competitors use that this brand should adopt
-- Missing price points where a combo should exist
+For EACH own brand, give exactly 1-2 short sentences. Be super crisp and specific:
+- Name the exact combo types competitors have that this brand is missing
+- Mention specific price points where a combo should exist
 
-Format: Write each brand name followed by a colon, then the insight. Plain text only, absolutely no markdown, no asterisks, no bold, no bullet points, no numbered lists. Just brand name colon insight sentences. Separate brands with a blank line."""
+Format: Brand name followed by colon, then 1-2 crisp sentences. Plain text only, no markdown, no asterisks, no bold, no bullets, no numbered lists. Separate brands with a blank line."""
 
-        ai_text = await call_claude(prompt, max_tokens=700)
+        ai_text = await call_claude(prompt, max_tokens=500)
 
         # Parse into per-brand insights
         brand_insights = _parse_brand_insights(ai_text, [g["own_brand"] for g in combo_data["groups"]])
@@ -731,14 +726,13 @@ async def menu_gap_ai_insights(scrape_date: str = None, force: bool = False):
 
 {chr(10).join(brand_blocks)}
 
-For EACH own brand, give 2-3 sentences of specific insight covering:
-- What specific food types, proteins, or offerings competitors have that this brand is missing (e.g. seafood options, vegetarian range, desserts, breakfast items, healthy/keto options)
-- Category depth gaps where competitors have much more variety in the same food type
-- Any obvious menu holes based on what the brand SHOULD offer given its cuisine type
+For EACH own brand, give exactly 1-2 short sentences. Be super crisp and specific:
+- Name the exact food types or categories competitors have that this brand is missing
+- Highlight where competitors have significantly more variety
 
-Format: Write each brand name followed by a colon, then the insight sentences. Plain text only, absolutely no markdown, no asterisks, no bold, no bullet points, no numbered lists. Just brand name colon insight sentences. Separate brands with a blank line."""
+Format: Brand name followed by colon, then 1-2 crisp sentences. Plain text only, no markdown, no asterisks, no bold, no bullets, no numbered lists. Separate brands with a blank line."""
 
-        ai_text = await call_claude(prompt, max_tokens=700)
+        ai_text = await call_claude(prompt, max_tokens=500)
 
         brand_insights = _parse_brand_insights(ai_text, [g["own_brand"] for g in groups])
         result = {"brand_insights": brand_insights, "generated_at": datetime.now(timezone.utc).isoformat()}

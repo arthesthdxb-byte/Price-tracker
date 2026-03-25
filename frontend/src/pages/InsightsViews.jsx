@@ -282,7 +282,7 @@ export const ComboInsightsView = ({ onBack }) => {
                   </div>
                   {group.price_gaps.map((gap, i) => (
                     <div key={i} style={{ fontSize: 13, color: T.body, padding: '4px 0', display: 'flex', gap: 8 }}>
-                      <Badge text={gap.type === 'missing' ? 'MISSING' : 'PRICING'} bg={gap.type === 'missing' ? 'rgba(229,115,115,0.15)' : 'rgba(66,165,245,0.15)'} color={gap.type === 'missing' ? T.priceUp : T.newItem} />
+                      <Badge text={gap.type === 'missing' ? 'MISSING' : 'FEWER'} bg={gap.type === 'missing' ? 'rgba(229,115,115,0.15)' : 'rgba(255,167,38,0.15)'} color={gap.type === 'missing' ? T.priceUp : T.removed} />
                       <span><strong>{gap.tier}</strong> — {gap.detail}</span>
                     </div>
                   ))}
