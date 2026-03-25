@@ -1268,6 +1268,17 @@ async def migrate_data(request: Request):
 
 app.include_router(api_router)
 
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class IframeAllowMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Frame-Options"] = "ALLOWALL"
+        response.headers["Content-Security-Policy"] = "frame-ancestors *"
+        return response
+
+app.add_middleware(IframeAllowMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
