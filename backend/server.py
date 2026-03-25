@@ -1268,6 +1268,9 @@ async def migrate_data(request: Request):
 
 app.include_router(api_router)
 
+from insights_router import insights_router
+app.include_router(insights_router)
+
 from starlette.middleware.base import BaseHTTPMiddleware
 
 class IframeAllowMiddleware(BaseHTTPMiddleware):

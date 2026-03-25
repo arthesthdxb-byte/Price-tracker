@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, RefreshCw, Download, X, Settings, ChevronDown, ChevronRight, Plus, Trash2, Edit2, Save, Package, Eye, EyeOff, Sparkles, TrendingUp } from 'lucide-react';
+import { Upload, RefreshCw, Download, X, Settings, ChevronDown, ChevronRight, Plus, Trash2, Edit2, Save, Package, Eye, EyeOff, Sparkles, TrendingUp, Target, Layers } from 'lucide-react';
+import { ComboInsightsView, MenuGapAnalyzerView } from '../pages/InsightsViews';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -327,6 +328,9 @@ const Dashboard = () => {
     if (lt) params.push(`latest_date=${encodeURIComponent(lt)}`);
     return params.length > 0 ? `?${params.join('&')}` : '';
   };
+
+  const viewComboInsights = () => setViewMode('combo-insights');
+  const viewMenuGaps = () => setViewMode('menu-gaps');
 
   const viewNpdTracker = async () => {
     setViewMode('npd');
@@ -659,6 +663,14 @@ const Dashboard = () => {
     );
   }
 
+  if (viewMode === 'combo-insights') {
+    return <ComboInsightsView onBack={() => setViewMode('dashboard')} />;
+  }
+
+  if (viewMode === 'menu-gaps') {
+    return <MenuGapAnalyzerView onBack={() => setViewMode('dashboard')} />;
+  }
+
   if (viewMode === 'all-history' && allHistory) {
     return (
       <div style={{ minHeight: '100vh', background: T.bg, padding: 24 }}>
@@ -927,6 +939,8 @@ const Dashboard = () => {
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button onClick={viewNpdTracker} style={headerBtnAccent}><Package size={14} /> NPD Tracker</button>
+            <button onClick={viewComboInsights} style={headerBtnStyle}><Target size={14} /> Combo Insights</button>
+            <button onClick={viewMenuGaps} style={headerBtnStyle}><Layers size={14} /> Menu Gaps</button>
             <button onClick={viewAllHistory} style={headerBtnStyle}><RefreshCw size={14} /> View All History</button>
             <button onClick={() => setShowManageBrands(true)} style={headerBtnStyle}><Settings size={14} /> Manage Brands</button>
             <button onClick={() => setShowUploadModal(true)} style={headerBtnAccent}><Upload size={14} /> Upload Data</button>

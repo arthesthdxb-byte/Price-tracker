@@ -20,7 +20,13 @@ frontend/          # React frontend (CRA + CRACO)
 
 backend/           # Python FastAPI backend
   server.py        # Main API server with all routes
+  insights_router.py # Combo Insights & Menu Gap Analyzer API router
   requirements.txt # Python dependencies
+
+frontend/          # React frontend (CRA + CRACO)
+  src/
+    pages/         # Feature view pages
+      InsightsViews.jsx  # ComboInsightsView & MenuGapAnalyzerView components
 ```
 
 ## Database Schema (PostgreSQL)
@@ -28,6 +34,7 @@ backend/           # Python FastAPI backend
 - **scrapes**: Stores daily scrape data with comparisons (scrape_date, brand_name, items JSONB, vs_baseline JSONB, vs_previous JSONB, ai_summary)
 - **brand_groups**: Stores brand groupings (own_brand, competitors TEXT[], group_order)
 - **npd_summaries**: Caches AI-generated NPD summaries by date pair (latest_date, previous_date, summary, created_at)
+- **ai_insight_cache**: Caches AI insights for Combo & Menu Gap features (cache_key, insight_type, insight_data JSONB, created_at)
 
 ## Development
 - Frontend runs on port 5000 (webview workflow)
@@ -42,6 +49,8 @@ backend/           # Python FastAPI backend
 - AI-generated summaries (requires ANTHROPIC_API_KEY)
 - Excel export of comparison results
 - NPD (New Product Development) Tracker: identifies newly launched and removed menu items between consecutive scrape dates, with AI-powered summaries
+- Combo Insights: analyzes combo/meal/deal items across brands with price tier breakdowns, gap identification, and AI recommendations
+- Menu Gap Analyzer: identifies missing categories, price range gaps, and variety gaps between own brands and competitors with AI recommendations
 - Enriched item format support: items can be float OR dict with price, original_price, description, category, image_url (use get_price()/get_item_detail() helpers)
 - Apify webhook integration for automated scrape data ingestion
 
