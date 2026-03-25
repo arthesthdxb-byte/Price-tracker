@@ -1256,8 +1256,9 @@ async def migrate_data(request: Request):
             if data.get("brand_groups"):
                 cur.execute("DELETE FROM brand_groups")
                 for r in data["brand_groups"]:
+                    comps = r["competitors"] if isinstance(r["competitors"], list) else json.loads(r["competitors"])
                     cur.execute("INSERT INTO brand_groups (own_brand, competitors, group_order) VALUES (%s, %s, %s)",
-                                (r["own_brand"], json.dumps(r["competitors"]), r["group_order"]))
+                                (r["own_brand"], comps, r["group_order"]))
             cur.close()
         return {"success": True, "message": "Data migrated"}
     except HTTPException:
@@ -1343,8 +1344,9 @@ async def startup_event():
                                     (r["scrape_date"], r["brand_name"], _json.dumps(r["items"])))
                     cur.execute("DELETE FROM brand_groups")
                     for r in seed.get("brand_groups", []):
+                        comps = r["competitors"] if isinstance(r["competitors"], list) else _json.loads(r["competitors"])
                         cur.execute("INSERT INTO brand_groups (own_brand, competitors, group_order) VALUES (%s, %s, %s)",
-                                    (r["own_brand"], _json.dumps(r["competitors"]), r["group_order"]))
+                                    (r["own_brand"], comps, r["group_order"]))
                     conn.commit()
                     logger.info(f"Seeded {len(seed.get('baseline', []))} baseline, {len(seed.get('scrapes', []))} scrapes, {len(seed.get('brand_groups', []))} brand groups")
                 else:
