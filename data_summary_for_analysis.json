@@ -1,0 +1,412 @@
+{
+  "brand_groups": [
+    {
+      "own": "Operational Falafel",
+      "competitors": [
+        "Zaatar w Zeit",
+        "Aloo Beirut"
+      ],
+      "order": 1
+    },
+    {
+      "own": "Sushi DO",
+      "competitors": [
+        "Sushi Buzz",
+        "Sushi Art"
+      ],
+      "order": 2
+    },
+    {
+      "own": "Right Bite",
+      "competitors": [
+        "The 500 Calorie Project",
+        "Kcal"
+      ],
+      "order": 3
+    },
+    {
+      "own": "Chin Chin",
+      "competitors": [
+        "Mandarin Oak",
+        "China Bistro"
+      ],
+      "order": 4
+    },
+    {
+      "own": "Taqado",
+      "competitors": [
+        "Tortilla",
+        "Chipotle"
+      ],
+      "order": 5
+    },
+    {
+      "own": "Pizzaro",
+      "competitors": [
+        "Pizza di Rocco",
+        "Oregano",
+        "Pizza Hut"
+      ],
+      "order": 6
+    },
+    {
+      "own": "Biryani Pot",
+      "competitors": [
+        "Gazebo",
+        "Art of Dum"
+      ],
+      "order": 7
+    },
+    {
+      "own": "Luca",
+      "competitors": [
+        "Pasta Della Nonna",
+        "The Pasta Cup"
+      ],
+      "order": 8
+    },
+    {
+      "own": "High Joint",
+      "competitors": [
+        "Just Burger",
+        "Krush Burger"
+      ],
+      "order": 9
+    },
+    {
+      "own": "Hot Bun Sliders",
+      "competitors": [
+        "Slider Stop"
+      ],
+      "order": 10
+    },
+    {
+      "own": "Awani",
+      "competitors": [
+        "Bait Maryam",
+        "Al Safadi"
+      ],
+      "order": 11
+    },
+    {
+      "own": "Zaroob",
+      "competitors": [
+        "Allo Beirut",
+        "Barbar"
+      ],
+      "order": 12
+    },
+    {
+      "own": "Circle Cafe",
+      "competitors": [
+        "LDC",
+        "Jones the Grocer",
+        "Parkers"
+      ],
+      "order": 13
+    },
+    {
+      "own": "KFC",
+      "competitors": [],
+      "order": 14
+    }
+  ],
+  "baseline_brands": [
+    {
+      "brand": "Al Safadi",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Allo Beirut",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Aloo Beirut",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Art of Dum",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Awani",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Bait Maryam",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Barbar",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Biryani Pot",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Chick N Slider",
+      "date": "12-Mar-26"
+    },
+    {
+      "brand": "Chin Chin",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "China Bistro",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Chipotle",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Circle Cafe",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Gazebo",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "High Joint",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Hot Bun Sliders",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Jones the Grocer",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Just Burger",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "KFC",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Kcal",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Krush Burger",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "LDC",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Luca",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Mandarin Oak",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Operational Falafel",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Oregano",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Parkers",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Pasta 2 Go",
+      "date": "12-Mar-26"
+    },
+    {
+      "brand": "Pasta Della Nonna",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Pizza Hut",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Pizza di Rocco",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Pizzaro",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Right Bite",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Salt",
+      "date": "23-Mar-26"
+    },
+    {
+      "brand": "Slider Stop",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Sushi Art",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Sushi Buzz",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Sushi DO",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Taqado",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "The 500 Calorie Project",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "The Pasta Cup",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Tortilla",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Zaatar w Zeit",
+      "date": "24-Feb-26"
+    },
+    {
+      "brand": "Zaroob",
+      "date": "24-Feb-26"
+    }
+  ],
+  "scrape_dates_summary": [
+    {
+      "scrape_date": "11-Mar-26",
+      "brands": 41,
+      "total_up": 525,
+      "total_down": 49,
+      "total_new": 273,
+      "total_removed": 137,
+      "total_items": 4461
+    },
+    {
+      "scrape_date": "12-Mar-26",
+      "brands": 41,
+      "total_up": 539,
+      "total_down": 64,
+      "total_new": 403,
+      "total_removed": 154,
+      "total_items": 4640
+    },
+    {
+      "scrape_date": "14-Mar-26",
+      "brands": 41,
+      "total_up": 543,
+      "total_down": 66,
+      "total_new": 255,
+      "total_removed": 229,
+      "total_items": 4351
+    },
+    {
+      "scrape_date": "15-Mar-26",
+      "brands": 42,
+      "total_up": 551,
+      "total_down": 67,
+      "total_new": 452,
+      "total_removed": 155,
+      "total_items": 4708
+    },
+    {
+      "scrape_date": "16-Mar-26",
+      "brands": 42,
+      "total_up": 547,
+      "total_down": 66,
+      "total_new": 424,
+      "total_removed": 183,
+      "total_items": 4652
+    },
+    {
+      "scrape_date": "18-Mar-26",
+      "brands": 42,
+      "total_up": 584,
+      "total_down": 62,
+      "total_new": 425,
+      "total_removed": 209,
+      "total_items": 4627
+    },
+    {
+      "scrape_date": "20-Mar-26",
+      "brands": 42,
+      "total_up": 637,
+      "total_down": 59,
+      "total_new": 457,
+      "total_removed": 377,
+      "total_items": 4491
+    },
+    {
+      "scrape_date": "22-Mar-26",
+      "brands": 42,
+      "total_up": 637,
+      "total_down": 59,
+      "total_new": 457,
+      "total_removed": 377,
+      "total_items": 4491
+    },
+    {
+      "scrape_date": "23-Mar-26",
+      "brands": 42,
+      "total_up": 624,
+      "total_down": 57,
+      "total_new": 331,
+      "total_removed": 466,
+      "total_items": 4276
+    },
+    {
+      "scrape_date": "6-Mar-26",
+      "brands": 35,
+      "total_up": 536,
+      "total_down": 44,
+      "total_new": 422,
+      "total_removed": 78,
+      "total_items": 3375
+    },
+    {
+      "scrape_date": "9-Mar-26",
+      "brands": 31,
+      "total_up": 537,
+      "total_down": 36,
+      "total_new": 199,
+      "total_removed": 131,
+      "total_items": 3061
+    }
+  ],
+  "sample_baseline_items_operational_falafel": [
+    "Foul",
+    "Sujuk",
+    "Balila",
+    "Hummus",
+    "Labneh",
+    "Zaatar",
+    "Makanek",
+    "Fattoush",
+    "Moutabal",
+    "Musabaha"
+  ],
+  "sample_latest_items": {
+    "Foul": 23.0,
+    "Sujuk": 35.0,
+    "Balila": 19.0,
+    "Hummus": 26.0,
+    "Labneh": 21.0
+  }
+}

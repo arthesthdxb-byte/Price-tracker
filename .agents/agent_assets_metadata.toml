@@ -18,3 +18,9 @@ id = "yTWJr5MqPq3xOBmErHeZw"
 uri = "file://export_brand_groups.json"
 type = "unspecified"
 title = "Brand Groups (14 groups with own brand + competitors)"
+
+[[outputs]]
+id = "A6v8u-pW-yMd8dhE3WenW"
+uri = "file://data_summary_for_analysis.json"
+type = "unspecified"
+title = "Menu Price Tracker - Data Summary for Analysis"
