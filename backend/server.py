@@ -1309,8 +1309,8 @@ async def apify_webhook(request: Request):
         logger.error(f"[Apify Webhook] Error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-@api_router.get("/admin/fix-dates")
-async def fix_dates(token: str = None):
+@api_router.get("/fix-may-dates")
+async def fix_may_dates(token: str = None):
     """One-time fix: rename May dates to Mar."""
     if token != os.environ.get("APIFY_TOKEN", ""):
         raise HTTPException(status_code=403, detail="Invalid token")
@@ -1322,7 +1322,7 @@ async def fix_dates(token: str = None):
             cur.execute("UPDATE scrapes SET scrape_date = '24-Mar-26' WHERE scrape_date = '24-May-26'")
             r2 = cur.rowcount
             cur.close()
-        return {"success": True, "23-May→23-Mar": r1, "24-May→24-Mar": r2}
+        return {"success": True, "23_May_to_23_Mar": r1, "24_May_to_24_Mar": r2}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
