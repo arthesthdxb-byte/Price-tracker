@@ -283,10 +283,10 @@ export const ComboInsightsView = ({ onBack }) => {
                     <span style={{ fontSize: 12, color: T.label }}>vs {group.competitors.map(c => c.brand_name).join(', ')}</span>
                   )}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 12, color: T.label }}>{isExpanded ? 'Collapse' : 'Expand'}</span>
-                  {isExpanded ? <ChevronDown size={18} color={T.label} /> : <ChevronRight size={18} color={T.label} />}
-                </div>
+                <button style={{ background: isExpanded ? T.primaryLight : '#FFF', border: `1px solid ${isExpanded ? T.primaryLight : T.border}`, color: isExpanded ? '#FFF' : T.primary, borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5, transition: 'all 0.2s ease', whiteSpace: 'nowrap' }}>
+                  {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  {isExpanded ? 'Hide Details' : 'View Tier Breakdown & Combo List'}
+                </button>
               </div>
 
               <div style={{ padding: 20 }}>
@@ -566,10 +566,10 @@ export const MenuGapAnalyzerView = ({ onBack }) => {
                   )}
                   {!hasAnyGaps && <Badge text="No gaps" bg={T.accentBg} color={T.primary} />}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 12, color: T.label }}>{isExpanded ? 'Collapse' : 'Expand'}</span>
-                  {isExpanded ? <ChevronDown size={18} color={T.label} /> : <ChevronRight size={18} color={T.label} />}
-                </div>
+                <button style={{ background: isExpanded ? T.primaryLight : '#FFF', border: `1px solid ${isExpanded ? T.primaryLight : T.border}`, color: isExpanded ? '#FFF' : T.primary, borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5, transition: 'all 0.2s ease', whiteSpace: 'nowrap' }}>
+                  {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  {isExpanded ? 'Hide Details' : 'View Competitor Analysis'}
+                </button>
               </div>
 
               <div style={{ padding: 20 }}>
