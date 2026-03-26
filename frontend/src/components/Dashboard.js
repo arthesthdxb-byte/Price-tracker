@@ -404,6 +404,16 @@ const Dashboard = () => {
     } catch (error) { toast.error('Error updating brand group'); }
   };
 
+  const handleDeleteScrapeDate = async (date) => {
+    if (!window.confirm(`Delete ALL data for ${date}? This cannot be undone.`)) return;
+    try {
+      await axios.delete(`${API}/scrape/${encodeURIComponent(date)}`);
+      toast.success(`Deleted ${date}`);
+      const response = await axios.get(`${API}/all-history`);
+      setAllHistory(response.data);
+    } catch (error) { toast.error('Error deleting scrape date'); }
+  };
+
   const handleDeleteBrandGroup = async (ownBrand) => {
     if (!window.confirm(`Delete ${ownBrand} and its competitor group?`)) return;
     try {
@@ -704,6 +714,7 @@ const Dashboard = () => {
                     <th style={{ ...thStyle, textAlign: 'center' }}>NO CHG</th>
                     <th style={{ ...thStyle, textAlign: 'center' }}>TOTAL</th>
                     <th style={{ ...thStyle, textAlign: 'center' }}>CHG%</th>
+                    <th style={{ ...thStyle, textAlign: 'center' }}>ACTIONS</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -724,6 +735,9 @@ const Dashboard = () => {
                             background: cp > 50 ? 'rgba(229,115,115,0.15)' : cp > 20 ? 'rgba(255,167,38,0.15)' : 'rgba(102,187,106,0.15)',
                             color: cp > 50 ? T.priceUp : cp > 20 ? T.removed : T.priceDown
                           }}>{cp.toFixed(1)}%</span>
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: 'center' }}>
+                          <button onClick={() => handleDeleteScrapeDate(dd.date)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.priceUp, padding: 4 }} title={`Delete ${dd.date}`}><Trash2 size={14} /></button>
                         </td>
                       </tr>
                     );
