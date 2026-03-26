@@ -118,7 +118,7 @@ const Dashboard = () => {
   const [itemsHistory, setItemsHistory] = useState(null);
   const [allHistory, setAllHistory] = useState(null);
   const [itemFilter, setItemFilter] = useState('all');
-  const [viewMode, setViewMode] = useState('dashboard');
+  const [viewMode, setViewMode] = useState('home');
   const [dateOptions] = useState(generateDateOptions());
   const [setAsBaseline, setSetAsBaseline] = useState(false);
   const [stagedMasterFile, setStagedMasterFile] = useState(null);
@@ -499,6 +499,51 @@ const Dashboard = () => {
   const thStyle = { background: T.tableHeader, color: '#FFFFFF', padding: '12px 16px', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' };
   const tdStyle = { padding: '12px 16px', borderBottom: `1px solid ${T.border}` };
 
+  if (viewMode === 'home') {
+    const modules = [
+      { key: 'dashboard', title: 'Menu Price Tracker', desc: 'Track price changes across brands vs baseline, compare dates, and view detailed brand-level breakdowns.', icon: TrendingUp, color: T.primary, accent: 'rgba(0,107,107,0.1)' },
+      { key: 'npd', title: 'NPD Tracker', desc: 'Discover new product launches and removed items across all tracked brands over time.', icon: Package, color: '#42A5F5', accent: 'rgba(66,165,245,0.1)' },
+      { key: 'combo-insights', title: 'Combo Insights', desc: 'Analyze combo meal strategies, price tiers, and identify pricing gaps vs competitors.', icon: Target, color: '#FFA726', accent: 'rgba(255,167,38,0.1)' },
+      { key: 'menu-gaps', title: 'Menu Gap Analyzer', desc: 'Find missing categories, variety gaps, and promotional opportunities vs competitors.', icon: Layers, color: '#E57373', accent: 'rgba(229,115,115,0.1)' },
+    ];
+    return (
+      <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg, #F5FAF8 0%, #FFFFFF 40%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <div style={{ width: '100%', maxWidth: 900 }}>
+          <div style={{ textAlign: 'center', marginBottom: 48 }}>
+            <h1 style={{ fontSize: 36, fontWeight: 800, color: T.primary, margin: 0, letterSpacing: '-0.5px' }}>MENU PRICE TRACKER</h1>
+            <p style={{ color: T.label, fontSize: 16, margin: '8px 0 0' }}>Talabat UAE | Competitive Pricing Intelligence</p>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 20 }}>
+            {modules.map(m => {
+              const Icon = m.icon;
+              return (
+                <button key={m.key} onClick={() => { if (m.key === 'dashboard') { setViewMode('dashboard'); } else if (m.key === 'npd') { viewNpdTracker(); } else { setViewMode(m.key); } }}
+                  style={{ ...cardStyle, padding: 28, textAlign: 'left', cursor: 'pointer', border: `1px solid ${T.border}`, transition: 'all 0.2s ease', position: 'relative', overflow: 'hidden' }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = m.color; e.currentTarget.style.boxShadow = `0 4px 20px ${m.accent}`; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.boxShadow = T.cardShadow; e.currentTarget.style.transform = 'translateY(0)'; }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: m.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon size={22} color={m.color} />
+                    </div>
+                    <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: T.title }}>{m.title}</h2>
+                  </div>
+                  <p style={{ margin: 0, fontSize: 14, color: T.label, lineHeight: 1.6 }}>{m.desc}</p>
+                  <div style={{ marginTop: 16, fontSize: 13, fontWeight: 600, color: m.color, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    Open <ChevronRight size={14} />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ textAlign: 'center', marginTop: 32 }}>
+            <button onClick={() => setShowUploadModal(true)} style={{ ...headerBtnAccent, padding: '10px 24px', fontSize: 14 }}><Upload size={16} /> Upload Data</button>
+            <button onClick={() => setShowManageBrands(true)} style={{ ...headerBtnStyle, padding: '10px 24px', fontSize: 14, marginLeft: 12 }}><Settings size={16} /> Manage Brands</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (viewMode === 'npd') {
     return (
       <div style={{ minHeight: '100vh', background: T.bg, padding: 24 }}>
@@ -537,7 +582,7 @@ const Dashboard = () => {
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <button onClick={() => setViewMode('dashboard')} style={headerBtnStyle}><X size={14} /> Back</button>
+                <button onClick={() => setViewMode('home')} style={headerBtnStyle}><X size={14} /> Back</button>
               </div>
             </div>
           </div>
@@ -674,11 +719,11 @@ const Dashboard = () => {
   }
 
   if (viewMode === 'combo-insights') {
-    return <ComboInsightsView onBack={() => setViewMode('dashboard')} />;
+    return <ComboInsightsView onBack={() => setViewMode('home')} />;
   }
 
   if (viewMode === 'menu-gaps') {
-    return <MenuGapAnalyzerView onBack={() => setViewMode('dashboard')} />;
+    return <MenuGapAnalyzerView onBack={() => setViewMode('home')} />;
   }
 
   if (viewMode === 'all-history' && allHistory) {
@@ -952,6 +997,7 @@ const Dashboard = () => {
             <p style={{ color: T.label, fontSize: 13, margin: '4px 0 0' }}>Talabat UAE | Baseline: {baselineDate} | Latest: {dashboardData.latest_date}{dashboardData.previous_date && ` | Previous: ${dashboardData.previous_date}`}</p>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button onClick={() => setViewMode('home')} style={headerBtnStyle}><X size={14} /> Home</button>
             <button onClick={viewNpdTracker} style={headerBtnAccent}><Package size={14} /> NPD Tracker</button>
             <button onClick={viewComboInsights} style={headerBtnStyle}><Target size={14} /> Combo Insights</button>
             <button onClick={viewMenuGaps} style={headerBtnStyle}><Layers size={14} /> Menu Gaps</button>
