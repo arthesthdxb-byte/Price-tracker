@@ -1309,6 +1309,24 @@ async def apify_webhook(request: Request):
         logger.error(f"[Apify Webhook] Error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@api_router.get("/admin/fix-dates")
+async def fix_dates(token: str = None):
+    """One-time fix: rename May dates to Mar."""
+    if token != os.environ.get("APIFY_TOKEN", ""):
+        raise HTTPException(status_code=403, detail="Invalid token")
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("UPDATE scrapes SET scrape_date = '23-Mar-26' WHERE scrape_date = '23-May-26'")
+            r1 = cur.rowcount
+            cur.execute("UPDATE scrapes SET scrape_date = '24-Mar-26' WHERE scrape_date = '24-May-26'")
+            r2 = cur.rowcount
+            cur.close()
+        return {"success": True, "23-May→23-Mar": r1, "24-May→24-Mar": r2}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @api_router.post("/migrate-data")
 async def migrate_data(request: Request):
     try:
