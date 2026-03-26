@@ -1540,7 +1540,15 @@ async def startup_event():
         logger.error(f"Error initializing brand groups: {e}")
 
 FRONTEND_BUILD = ROOT_DIR.parent / "frontend" / "build"
+logger.info(f"Looking for frontend build at: {FRONTEND_BUILD.resolve()} (exists: {FRONTEND_BUILD.exists()})")
+if not FRONTEND_BUILD.exists():
+    alt_build = Path("/home/runner/workspace/frontend/build")
+    logger.info(f"Trying alternative path: {alt_build} (exists: {alt_build.exists()})")
+    if alt_build.exists():
+        FRONTEND_BUILD = alt_build
+
 if FRONTEND_BUILD.exists():
+    logger.info(f"Serving frontend from: {FRONTEND_BUILD.resolve()}")
     app.mount("/static", StaticFiles(directory=str(FRONTEND_BUILD / "static")), name="static")
 
     @app.get("/{full_path:path}")
@@ -1549,3 +1557,5 @@ if FRONTEND_BUILD.exists():
         if file_path.exists() and file_path.is_file():
             return FileResponse(str(file_path))
         return FileResponse(str(FRONTEND_BUILD / "index.html"))
+else:
+    logger.warning(f"Frontend build NOT found at {FRONTEND_BUILD}. Only API routes will be available.")
