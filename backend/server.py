@@ -178,6 +178,18 @@ SLUG_TO_BRAND = {
     "parkers-al-mushrif": "Parkers",
 }
 
+def get_apify_token() -> str:
+    raw = os.environ.get("APIFY_TOKEN", "")
+    if not raw:
+        return ""
+    if "token=" in raw:
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(raw)
+        token_vals = parse_qs(parsed.query).get("token", [])
+        if token_vals:
+            return token_vals[0]
+    return raw.strip()
+
 def extract_slug(url: str) -> str:
     try:
         parts = url.split("/")
@@ -1163,7 +1175,7 @@ async def apify_pull(dataset_id: str = None, token: str = None, run_id: str = No
     Or for latest run: /api/apify-pull?token=YOUR_APIFY_TOKEN
     """
     try:
-        apify_token = os.environ.get("APIFY_TOKEN")
+        apify_token = get_apify_token()
         if not apify_token:
             raise HTTPException(status_code=500, detail="APIFY_TOKEN not configured")
         if token != apify_token:
@@ -1247,7 +1259,7 @@ async def apify_webhook(request: Request):
             dataset_id = resource.get("defaultDatasetId")
             if not dataset_id:
                 raise HTTPException(status_code=400, detail="No datasetId in webhook payload")
-            apify_token = os.environ.get("APIFY_TOKEN")
+            apify_token = get_apify_token()
             if not apify_token:
                 raise HTTPException(status_code=500, detail="APIFY_TOKEN not configured")
             import httpx
@@ -1312,7 +1324,7 @@ async def apify_webhook(request: Request):
 @api_router.get("/fix-may-dates")
 async def fix_may_dates(token: str = None):
     """One-time fix: rename May dates to Mar."""
-    if token != os.environ.get("APIFY_TOKEN", ""):
+    if token != get_apify_token():
         raise HTTPException(status_code=403, detail="Invalid token")
     try:
         with get_db() as conn:
@@ -1332,7 +1344,7 @@ async def migrate_data(request: Request):
     try:
         data = await request.json()
         token = data.get("token", "")
-        if token != os.environ.get("APIFY_TOKEN", ""):
+        if token != get_apify_token():
             raise HTTPException(status_code=403, detail="Invalid token")
         with get_db() as conn:
             cur = conn.cursor()
