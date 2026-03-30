@@ -1520,6 +1520,9 @@ app.include_router(api_router)
 from insights_router import insights_router
 app.include_router(insights_router)
 
+from competitor_router import competitor_router
+app.include_router(competitor_router)
+
 from starlette.middleware.base import BaseHTTPMiddleware
 
 class IframeAllowMiddleware(BaseHTTPMiddleware):

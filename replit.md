@@ -21,12 +21,14 @@ frontend/          # React frontend (CRA + CRACO)
 backend/           # Python FastAPI backend
   server.py        # Main API server with all routes
   insights_router.py # Combo Insights & Menu Gap Analyzer API router
+  competitor_router.py # Competitor Price Check API router
   requirements.txt # Python dependencies
 
 frontend/          # React frontend (CRA + CRACO)
   src/
     pages/         # Feature view pages
       InsightsViews.jsx  # ComboInsightsView & MenuGapAnalyzerView components
+      CompetitorPriceCheck.jsx  # Competitor Price Check view
 ```
 
 ## Database Schema (PostgreSQL)
@@ -35,6 +37,8 @@ frontend/          # React frontend (CRA + CRACO)
 - **brand_groups**: Stores brand groupings (own_brand, competitors TEXT[], group_order)
 - **npd_summaries**: Caches AI-generated NPD summaries by date pair (latest_date, previous_date, summary, created_at)
 - **ai_insight_cache**: Caches AI insights for Combo & Menu Gap features (cache_key, insight_type, insight_data JSONB, created_at)
+- **competitor_item_matches**: Caches AI-matched item pairs between own brands and competitors (own_brand, own_item_name, competitor_brand, matched_item_name, match_confidence, data_hash)
+- **competitor_price_analysis**: Caches AI pricing analysis results keyed by data hash (data_hash, analysis_text, created_at)
 
 ## Development
 - Frontend runs on port 5000 (webview workflow)
@@ -48,6 +52,7 @@ frontend/          # React frontend (CRA + CRACO)
 - Historical price trend analysis
 - AI-generated summaries (requires ANTHROPIC_API_KEY)
 - Excel export of comparison results
+- Competitor Price Check: per-item competitor price comparison with AI-powered fuzzy name matching and strategic pricing analysis, with caching
 - NPD (New Product Development) Tracker: identifies newly launched and removed menu items between consecutive scrape dates, with AI-powered summaries
 - Combo Insights: analyzes combo/meal/deal items across brands with price tier breakdowns, gap identification, and AI recommendations
 - Menu Gap Analyzer: identifies missing categories, price range gaps, and variety gaps between own brands and competitors with AI recommendations
