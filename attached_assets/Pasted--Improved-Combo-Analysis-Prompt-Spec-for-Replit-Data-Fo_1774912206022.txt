@@ -1,0 +1,112 @@
+# Improved Combo Analysis Prompt — Spec for Replit
+
+## Data Format Sent to Claude
+Each combo line should be:
+```
+Name | Price (AED) | Category/Type | Description | [Component Items if parseable]
+```
+
+## The Prompt
+
+```
+You are a restaurant competitive intelligence analyst specializing in combo/meal deal strategy.
+
+## DATA FORMAT
+Each combo is listed as: Name | Price (AED) | Category/Type | Description
+
+## YOUR TASK
+Analyze the combo offerings of {own_brand} against competitors ({competitor_list}).
+
+For EACH combo, perform these analyses:
+
+### 1. COMBO STRUCTURE ANALYSIS
+- What items are included? (Parse from description — e.g., "1 Main + 1 Side + 1 Drink")
+- What category/occasion does it serve? (Value meal, family sharing, party pack, kids meal, snack combo, build-your-own, etc.)
+- What is the combo's positioning? (Budget, mid-range, premium)
+
+### 2. VALUE ANALYSIS (CRITICAL)
+For each combo where individual item prices can be identified or estimated from the brand's own menu:
+- Calculate the SUM of standalone item prices if ordered individually
+- Calculate the COMBO DISCOUNT % = ((sum_of_standalone - combo_price) / sum_of_standalone) × 100
+- Flag combos where discount % < 10% as "weak value proposition"
+- Flag combos where discount % > 30% as "aggressive — check margin"
+- If standalone prices cannot be determined, note "standalone prices not available" — do NOT guess
+
+### 3. GAP ANALYSIS
+Compare {own_brand}'s combo portfolio against each competitor:
+- Missing combo TYPES (e.g., competitor has family packs but own brand doesn't)
+- Missing combo OCCASIONS (e.g., no breakfast combo, no snack combo, no kids meal deal)
+- Pricing gaps — own brand's comparable combo is >15% more expensive or >15% cheaper
+- Component gaps — competitor includes drinks/desserts in combos where own brand doesn't
+
+### 4. RECOMMENDATIONS
+For each identified gap, provide:
+- Recommended combo name and structure
+- Suggested price point (based on competitor benchmarking and own brand's standalone pricing)
+- Expected discount % at that price
+- Priority: P1 (launch ASAP — clear competitive disadvantage), P2 (next quarter), P3 (nice to have)
+
+## OUTPUT FORMAT
+Return a JSON object with this structure:
+{
+  "own_brand_combos": [
+    {
+      "name": "...",
+      "price": 0.00,
+      "category": "...",
+      "description": "...",
+      "components_parsed": ["item1", "item2"],
+      "estimated_standalone_total": 0.00 or null,
+      "discount_pct": 0.00 or null,
+      "value_flag": "good_value" | "weak_value" | "aggressive" | "unknown"
+    }
+  ],
+  "competitor_combos": { ... same structure per competitor ... },
+  "combo_type_gaps": [
+    {
+      "gap_type": "...",
+      "competitors_offering": ["..."],
+      "recommendation": "...",
+      "suggested_price": 0.00,
+      "suggested_discount_pct": 0.00,
+      "priority": "P1" | "P2" | "P3"
+    }
+  ],
+  "pricing_gaps": [
+    {
+      "own_combo": "...",
+      "own_price": 0.00,
+      "competitor": "...",
+      "competitor_combo": "...",
+      "competitor_price": 0.00,
+      "price_diff_pct": 0.00,
+      "action": "..."
+    }
+  ],
+  "summary": "2-3 sentence executive summary of combo strategy position"
+}
+```
+
+## IMPORTANT: What to Send Alongside Combos
+
+The combo analysis prompt MUST also receive the brand's **full standalone menu with prices** (not just combos). Without this, Claude cannot calculate discount percentages. Send it as a separate section:
+
+```
+## STANDALONE MENU (for discount % calculation)
+{own_brand} standalone items:
+- Item Name | Price (AED) | Category
+
+{competitor_1} standalone items:
+- Item Name | Price (AED) | Category
+```
+
+This is the key missing piece in Replit's current plan — they're only sending combo data. Without standalone prices alongside, the discount % calculation is impossible.
+
+## Cache Key
+Bump to `combo_ai_v4` (they planned v3, but this is a bigger change).
+
+## Frontend Implication
+The response structure is richer now. The frontend combo insights card should show:
+- Combo name + price + discount % badge (green if >15%, yellow if 10-15%, red if <10%)
+- Gap cards with P1/P2/P3 priority tags
+- Price comparison table (own vs competitor combos)

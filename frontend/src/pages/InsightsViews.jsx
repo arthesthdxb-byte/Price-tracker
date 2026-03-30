@@ -87,6 +87,163 @@ const BrandAiBullets = ({ bullets }) => {
   );
 };
 
+const DiscountBadge = ({ pct, flag }) => {
+  if (pct == null && (!flag || flag === 'unknown')) return <span style={{ fontSize: 11, color: T.label }}>N/A</span>;
+  const val = pct != null ? Math.round(pct) : null;
+  let bg, color, label;
+  if (flag === 'weak_value' || (val != null && val < 10)) {
+    bg = 'rgba(229,115,115,0.15)'; color = T.priceUp; label = val != null ? `${val}% off` : 'Weak';
+  } else if (flag === 'aggressive' || (val != null && val > 30)) {
+    bg = 'rgba(255,152,0,0.15)'; color = '#E65100'; label = val != null ? `${val}% off` : 'Aggressive';
+  } else if (val != null && val >= 10) {
+    bg = 'rgba(102,187,106,0.15)'; color = T.priceDown; label = `${val}% off`;
+  } else {
+    bg = T.accentBg; color = T.primary; label = flag || 'N/A';
+  }
+  return <Badge text={label} bg={bg} color={color} />;
+};
+
+const PriorityBadge = ({ priority }) => {
+  const styles = {
+    P1: { bg: 'rgba(229,115,115,0.15)', color: T.priceUp },
+    P2: { bg: 'rgba(255,167,38,0.15)', color: T.removed },
+    P3: { bg: 'rgba(189,189,189,0.15)', color: T.label },
+  };
+  const s = styles[priority] || styles.P3;
+  return <Badge text={priority} bg={s.bg} color={s.color} />;
+};
+
+const ComboAiAnalysis = ({ analysis }) => {
+  if (!analysis) return null;
+  const { own_brand_combos, combo_type_gaps, pricing_gaps, summary } = analysis;
+
+  return (
+    <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {summary && (
+        <div style={{ padding: '14px 16px', background: 'linear-gradient(135deg, rgba(126,217,87,0.06) 0%, rgba(0,107,107,0.06) 100%)', borderRadius: 10, borderLeft: `3px solid ${T.accent}` }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.primary, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            <Sparkles size={13} color={T.accent} /> Executive Summary
+          </div>
+          <div style={{ fontSize: 13, color: T.body, lineHeight: 1.6 }}>{summary}</div>
+        </div>
+      )}
+
+      {own_brand_combos && own_brand_combos.length > 0 && (
+        <div style={{ padding: '14px 16px', background: T.tableAltRow, borderRadius: 10, border: `1px solid ${T.divider}` }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.primary, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            <DollarSign size={13} color={T.primary} /> Value Analysis
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr>
+                  <th style={{ ...thStyle, textAlign: 'left', padding: '8px 12px', fontSize: 11 }}>COMBO</th>
+                  <th style={{ ...thStyle, textAlign: 'right', padding: '8px 12px', fontSize: 11 }}>PRICE</th>
+                  <th style={{ ...thStyle, textAlign: 'right', padding: '8px 12px', fontSize: 11 }}>STANDALONE</th>
+                  <th style={{ ...thStyle, textAlign: 'center', padding: '8px 12px', fontSize: 11 }}>DISCOUNT</th>
+                </tr>
+              </thead>
+              <tbody>
+                {own_brand_combos.map((c, i) => (
+                  <tr key={i} style={{ background: i % 2 === 0 ? '#FFF' : T.tableAltRow }}>
+                    <td style={{ ...tdStyle, padding: '8px 12px', maxWidth: 220 }}>
+                      <div style={{ fontWeight: 500 }}>{c.name}</div>
+                      {c.components_parsed && c.components_parsed.length > 0 && (
+                        <div style={{ fontSize: 11, color: T.label, marginTop: 2 }}>{c.components_parsed.join(' + ')}</div>
+                      )}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'right', padding: '8px 12px', fontWeight: 600, color: T.primary }}>{c.price} AED</td>
+                    <td style={{ ...tdStyle, textAlign: 'right', padding: '8px 12px', color: T.label }}>
+                      {c.estimated_standalone_total != null ? `${c.estimated_standalone_total} AED` : '-'}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'center', padding: '8px 12px' }}>
+                      <DiscountBadge pct={c.discount_pct} flag={c.value_flag} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {combo_type_gaps && combo_type_gaps.length > 0 && (
+        <div style={{ padding: '14px 16px', background: 'rgba(255,167,38,0.04)', borderRadius: 10, border: '1px solid rgba(255,167,38,0.15)' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.removed, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            <AlertTriangle size={13} /> Combo Type Gaps
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {combo_type_gaps.map((gap, i) => (
+              <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '10px 12px', background: '#FFF', borderRadius: 8, border: `1px solid ${T.divider}` }}>
+                <PriorityBadge priority={gap.priority} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, color: T.body }}>{gap.gap_type}</div>
+                  <div style={{ fontSize: 12, color: T.label, marginTop: 3 }}>{gap.recommendation}</div>
+                  {gap.suggested_price > 0 && (
+                    <div style={{ fontSize: 12, color: T.primary, marginTop: 3, fontWeight: 500 }}>
+                      Suggested: ~{gap.suggested_price} AED
+                      {gap.suggested_discount_pct > 0 && ` (${Math.round(gap.suggested_discount_pct)}% discount)`}
+                    </div>
+                  )}
+                  {gap.competitors_offering && gap.competitors_offering.length > 0 && (
+                    <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                      {gap.competitors_offering.map((comp, ci) => (
+                        <Badge key={ci} text={comp} bg={T.compBadgeBg} color={T.compBadgeText} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {pricing_gaps && pricing_gaps.length > 0 && (
+        <div style={{ padding: '14px 16px', background: T.tableAltRow, borderRadius: 10, border: `1px solid ${T.divider}` }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.primary, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            <TrendingUp size={13} /> Price Comparisons
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr>
+                  <th style={{ ...thStyle, textAlign: 'left', padding: '8px 12px', fontSize: 11 }}>YOUR COMBO</th>
+                  <th style={{ ...thStyle, textAlign: 'right', padding: '8px 12px', fontSize: 11 }}>YOUR PRICE</th>
+                  <th style={{ ...thStyle, textAlign: 'left', padding: '8px 12px', fontSize: 11 }}>COMPETITOR</th>
+                  <th style={{ ...thStyle, textAlign: 'right', padding: '8px 12px', fontSize: 11 }}>THEIR PRICE</th>
+                  <th style={{ ...thStyle, textAlign: 'center', padding: '8px 12px', fontSize: 11 }}>DIFF</th>
+                  <th style={{ ...thStyle, textAlign: 'left', padding: '8px 12px', fontSize: 11 }}>ACTION</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pricing_gaps.map((pg, i) => {
+                  const diffColor = pg.price_diff_pct > 0 ? T.priceUp : T.priceDown;
+                  return (
+                    <tr key={i} style={{ background: i % 2 === 0 ? '#FFF' : T.tableAltRow }}>
+                      <td style={{ ...tdStyle, padding: '8px 12px', fontWeight: 500 }}>{pg.own_combo}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', padding: '8px 12px', fontWeight: 600, color: T.primary }}>{pg.own_price} AED</td>
+                      <td style={{ ...tdStyle, padding: '8px 12px' }}>
+                        <div style={{ fontSize: 12, color: T.label }}>{pg.competitor}</div>
+                        <div style={{ fontWeight: 500 }}>{pg.competitor_combo}</div>
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: 'right', padding: '8px 12px', fontWeight: 600 }}>{pg.competitor_price} AED</td>
+                      <td style={{ ...tdStyle, textAlign: 'center', padding: '8px 12px' }}>
+                        <span style={{ color: diffColor, fontWeight: 600 }}>{pg.price_diff_pct > 0 ? '+' : ''}{Math.round(pg.price_diff_pct)}%</span>
+                      </td>
+                      <td style={{ ...tdStyle, padding: '8px 12px', fontSize: 12, color: T.body }}>{pg.action}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const BrandInsightsCard = ({ title, brandInsights, loading, onRegenerate }) => (
   <div style={{ ...cardStyle, padding: 20, marginBottom: 24 }}>
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -200,7 +357,7 @@ export const ComboInsightsView = ({ onBack }) => {
   const getAiForBrand = (brandName) => {
     if (!aiInsights) return null;
     const match = aiInsights.find(bi => bi.brand && bi.brand.toLowerCase() === brandName.toLowerCase());
-    return match?.bullets || null;
+    return match || null;
   };
 
   return (
@@ -290,7 +447,11 @@ export const ComboInsightsView = ({ onBack }) => {
               </div>
 
               <div style={{ padding: 20 }}>
-                {brandAi && <BrandAiBullets bullets={brandAi} />}
+                {brandAi && brandAi.analysis ? (
+                  <ComboAiAnalysis analysis={brandAi.analysis} />
+                ) : brandAi && brandAi.bullets ? (
+                  <BrandAiBullets bullets={brandAi.bullets} />
+                ) : null}
                 {aiLoading && !brandAi && (
                   <div style={{ padding: '10px 16px', marginTop: 8, background: T.tableAltRow, borderRadius: 8, fontSize: 13, color: T.label, display: 'flex', alignItems: 'center', gap: 8 }}>
                     <RefreshCw size={12} className="animate-spin" /> Generating AI insights...

@@ -559,12 +559,83 @@ async def combo_insights(scrape_date: str = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _extract_standalone_items(items: dict) -> list:
+    """Extract non-combo standalone menu items with prices for discount calculation."""
+    standalone = []
+    for name, data in items.items():
+        price = get_price(data)
+        if price <= 0:
+            continue
+        desc = get_description(data)
+        cat = get_category(data)
+        if not is_combo(name, desc, cat):
+            inferred_cat = cat or infer_category(name)
+            standalone.append({"name": name, "price": price, "category": inferred_cat})
+    return sorted(standalone, key=lambda x: x["name"])
+
+
+def _build_standalone_section(brand_name: str, items: dict) -> str:
+    """Build standalone menu section for a brand, capped at 80 items."""
+    standalone = _extract_standalone_items(items)
+    if not standalone:
+        return f"{brand_name}: no standalone items available"
+    lines = [f"  {s['name']} | {s['price']} AED | {s['category']}" for s in standalone[:80]]
+    return f"{brand_name} standalone items ({len(standalone)} total):\n" + "\n".join(lines)
+
+
+def _parse_combo_json(ai_text: str) -> Optional[dict]:
+    """Parse JSON from Claude's combo analysis response, with basic validation."""
+    if not ai_text:
+        return None
+    try:
+        start = ai_text.find("{")
+        end = ai_text.rfind("}") + 1
+        if start >= 0 and end > start:
+            data = json.loads(ai_text[start:end])
+            if not isinstance(data, dict):
+                return None
+            for key in ("own_brand_combos", "combo_type_gaps", "pricing_gaps"):
+                if key in data and not isinstance(data[key], list):
+                    data[key] = []
+            if "competitor_combos" in data and not isinstance(data["competitor_combos"], dict):
+                data["competitor_combos"] = {}
+            for combo in (data.get("own_brand_combos") or []):
+                if not isinstance(combo.get("price"), (int, float)):
+                    combo["price"] = 0
+                if not isinstance(combo.get("discount_pct"), (int, float, type(None))):
+                    combo["discount_pct"] = None
+                if not isinstance(combo.get("estimated_standalone_total"), (int, float, type(None))):
+                    combo["estimated_standalone_total"] = None
+                if combo.get("value_flag") not in ("good_value", "weak_value", "aggressive", "unknown", None):
+                    combo["value_flag"] = "unknown"
+            for gap in (data.get("combo_type_gaps") or []):
+                if not isinstance(gap.get("suggested_price"), (int, float, type(None))):
+                    gap["suggested_price"] = None
+                if not isinstance(gap.get("suggested_discount_pct"), (int, float, type(None))):
+                    gap["suggested_discount_pct"] = None
+                if gap.get("priority") not in ("P1", "P2", "P3", None):
+                    gap["priority"] = "P3"
+                if not isinstance(gap.get("competitors_offering"), list):
+                    gap["competitors_offering"] = []
+            for pg in (data.get("pricing_gaps") or []):
+                if not isinstance(pg.get("own_price"), (int, float)):
+                    pg["own_price"] = 0
+                if not isinstance(pg.get("competitor_price"), (int, float)):
+                    pg["competitor_price"] = 0
+                if not isinstance(pg.get("price_diff_pct"), (int, float)):
+                    pg["price_diff_pct"] = 0
+            return data
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return None
+
+
 @insights_router.get("/combos/ai")
 async def combo_ai_insights(scrape_date: str = None, force: bool = False):
     """
-    AI combo insights — brand-by-brand, sends actual combo names + descriptions
-    so Claude can identify missing combo types, bundling patterns, etc.
-    Returns array of per-brand insights.
+    AI combo insights — per brand group, sends combo details + standalone menu
+    so Claude can perform structure, value/discount, and gap analysis.
+    Returns structured JSON analysis per brand group.
     """
     try:
         combo_data = await combo_insights(scrape_date)
@@ -572,82 +643,205 @@ async def combo_ai_insights(scrape_date: str = None, force: bool = False):
             return {"has_data": False, "insights": None}
 
         target = combo_data["scrape_date"]
-        cache_key = f"combo_ai_v2_{target}"
+        cache_key = f"combo_ai_v4_{target}"
 
         if not force:
             cached = get_cached_insight(cache_key)
             if cached:
                 return {"has_data": True, "scrape_date": target, "insights": cached, "cached": True}
 
-        # Build brand-by-brand prompt with actual combo details
-        brand_blocks = []
+        with get_db() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT brand_name, items FROM scrapes WHERE scrape_date = %s", (target,))
+            scrape_data = {r["brand_name"]: r["items"] for r in cur.fetchall()}
+            cur.close()
+
+        brand_analyses = []
         for g in combo_data["groups"]:
             own = g["own_data"]
             if not own["combos"] and not any(c["combos"] for c in g["competitors"]):
                 continue
 
-            # Own brand combos: name | price | short description
-            own_lines = []
-            for c in own["combos"][:25]:  # cap at 25
-                desc = c.get("description", "")[:60].replace("\n", " ")
-                own_lines.append(f"  {c['name']} | {c['price']} AED | {desc}")
+            own_brand = own["brand_name"]
+            competitor_names = [c["brand_name"] for c in g["competitors"] if c["combos"]]
 
-            # Competitor combos
+            own_lines = []
+            for c in own["combos"][:30]:
+                desc = c.get("description", "")[:80].replace("\n", " ")
+                cat = c.get("category", "")
+                own_lines.append(f"  {c['name']} | {c['price']} AED | {cat} | {desc}")
+
             comp_blocks = []
             for comp in g["competitors"]:
                 if not comp["combos"]:
                     comp_blocks.append(f"  {comp['brand_name']}: 0 combos")
                     continue
                 c_lines = []
-                for c in comp["combos"][:25]:
-                    desc = c.get("description", "")[:60].replace("\n", " ")
-                    c_lines.append(f"    {c['name']} | {c['price']} AED | {desc}")
-                comp_blocks.append(f"  {comp['brand_name']} ({comp['combo_count']} combos, avg {comp['avg_combo_price']} AED):\n" + "\n".join(c_lines))
+                for c in comp["combos"][:30]:
+                    desc = c.get("description", "")[:80].replace("\n", " ")
+                    cat = c.get("category", "")
+                    c_lines.append(f"    {c['name']} | {c['price']} AED | {cat} | {desc}")
+                comp_blocks.append(
+                    f"  {comp['brand_name']} ({comp['combo_count']} combos, avg {comp['avg_combo_price']} AED):\n"
+                    + "\n".join(c_lines)
+                )
 
-            gaps_str = "; ".join([f"{gap['tier']}: {gap['detail']}" for gap in g["price_gaps"]]) if g["price_gaps"] else "none"
+            standalone_sections = []
+            if own_brand in scrape_data:
+                standalone_sections.append(_build_standalone_section(own_brand, scrape_data[own_brand]))
+            for comp in g["competitors"]:
+                if comp["brand_name"] in scrape_data:
+                    standalone_sections.append(_build_standalone_section(comp["brand_name"], scrape_data[comp["brand_name"]]))
 
-            block = (
-                f"[{own['brand_name']}] OWN — {own['combo_count']} combos, avg {own['avg_combo_price']} AED, "
-                f"range {own['min_combo']}-{own['max_combo']} AED\n"
-                + "\n".join(own_lines) + "\n"
-                + "COMPETITORS:\n" + "\n".join(comp_blocks) + "\n"
-                + f"Price range gaps: {gaps_str}"
-            )
-            brand_blocks.append(block)
+            prompt = f"""You are a restaurant competitive intelligence analyst specializing in combo/meal deal strategy.
 
-        prompt = f"""You are a menu strategist for UAE restaurant brands on Talabat. Analyze each brand group's combos.
+## DATA FORMAT
+Each combo is listed as: Name | Price (AED) | Category/Type | Description
 
-{chr(10).join(brand_blocks)}
+## COMBO DATA
+[{own_brand}] OWN — {own['combo_count']} combos, avg {own['avg_combo_price']} AED, range {own['min_combo']}-{own['max_combo']} AED
+{chr(10).join(own_lines)}
 
-For EACH own brand, write the brand name on its own line, then 3-5 bullet points below it. Each bullet must be one short actionable sentence with specific AED prices or competitor names. Cover:
-- Missing combo TYPES that competitors have (family boxes, breakfast bundles, dessert combos, build-your-own, value meals, sharing platters etc.)
-- Specific competitor combos worth copying or matching
-- Exact price gaps to fill (e.g. "Add a 25-30 AED lunch combo")
-- Quick wins: what one combo to launch first and at what price
+COMPETITORS:
+{chr(10).join(comp_blocks)}
 
-Format exactly like this:
-BRANDNAME
-- First bullet point
-- Second bullet point
-- Third bullet point
+## STANDALONE MENU (for discount % calculation)
+{chr(10).join(standalone_sections)}
 
-NEXTBRAND
-- First bullet point
+## YOUR TASK
+Analyze the combo offerings of {own_brand} against competitors ({', '.join(competitor_names) if competitor_names else 'none'}).
 
-Keep each bullet under 20 words. No paragraphs. No bold. No asterisks. Just dashes for bullets."""
+### 1. COMBO STRUCTURE ANALYSIS
+For each combo: parse components from description (e.g. "1 Main + 1 Side + 1 Drink"), identify category/occasion (value meal, family sharing, party pack, kids meal, snack combo, build-your-own), and positioning (budget/mid-range/premium).
 
-        ai_text = await call_claude(prompt, max_tokens=900)
+### 2. VALUE ANALYSIS
+For each combo where standalone item prices can be identified from the STANDALONE MENU data:
+- Calculate SUM of standalone item prices if ordered individually
+- Calculate COMBO DISCOUNT % = ((sum_of_standalone - combo_price) / sum_of_standalone) * 100
+- Flag combos where discount % < 10% as "weak_value"
+- Flag combos where discount % > 30% as "aggressive"
+- If standalone prices cannot be determined, set value_flag to "unknown" — do NOT guess
 
-        # Parse into per-brand insights
-        brand_insights = _parse_brand_insights(ai_text, [g["own_brand"] for g in combo_data["groups"]])
-        result = {"brand_insights": brand_insights, "generated_at": datetime.now(timezone.utc).isoformat()}
+### 3. GAP ANALYSIS
+Compare {own_brand}'s combo portfolio against each competitor:
+- Missing combo TYPES (family packs, breakfast bundles, dessert combos, kids meals, sharing platters, build-your-own, snack combos)
+- Pricing gaps where comparable combos differ by >15%
+- Component gaps (competitor includes drinks/desserts where own brand doesn't)
 
-        if ai_text:
-            set_cached_insight(cache_key, "combo_ai_v2", result)
+### 4. RECOMMENDATIONS
+For each gap, provide: suggested combo structure, price point, expected discount %, and priority (P1=launch ASAP, P2=next quarter, P3=nice to have).
+
+## OUTPUT FORMAT
+Return ONLY a valid JSON object (no markdown, no code fences) with this structure:
+{{
+  "own_brand_combos": [
+    {{
+      "name": "...",
+      "price": 0.00,
+      "category": "...",
+      "components_parsed": ["item1", "item2"],
+      "estimated_standalone_total": 0.00,
+      "discount_pct": 0.00,
+      "value_flag": "good_value"
+    }}
+  ],
+  "competitor_combos": {{
+    "CompetitorName": [
+      {{
+        "name": "...",
+        "price": 0.00,
+        "category": "...",
+        "components_parsed": ["item1"],
+        "estimated_standalone_total": null,
+        "discount_pct": null,
+        "value_flag": "unknown"
+      }}
+    ]
+  }},
+  "combo_type_gaps": [
+    {{
+      "gap_type": "...",
+      "competitors_offering": ["..."],
+      "recommendation": "...",
+      "suggested_price": 0.00,
+      "suggested_discount_pct": 0.00,
+      "priority": "P1"
+    }}
+  ],
+  "pricing_gaps": [
+    {{
+      "own_combo": "...",
+      "own_price": 0.00,
+      "competitor": "...",
+      "competitor_combo": "...",
+      "competitor_price": 0.00,
+      "price_diff_pct": 0.00,
+      "action": "..."
+    }}
+  ],
+  "summary": "2-3 sentence executive summary"
+}}
+
+value_flag must be one of: "good_value", "weak_value", "aggressive", "unknown"
+priority must be one of: "P1", "P2", "P3"
+Only include combos and gaps that exist — use empty arrays if none found."""
+
+            ai_text = await call_claude(prompt, max_tokens=2500)
+            parsed = _parse_combo_json(ai_text)
+
+            if parsed and isinstance(parsed.get("summary"), str):
+                brand_analyses.append({
+                    "brand": own_brand,
+                    "analysis": parsed,
+                    "bullets": _extract_bullets_from_combo_analysis(parsed),
+                })
+            else:
+                fallback_bullets = []
+                brand_parsed = _parse_brand_insights(ai_text or "", [own_brand])
+                if brand_parsed and brand_parsed[0].get("bullets"):
+                    fallback_bullets = brand_parsed[0]["bullets"]
+                elif ai_text:
+                    for line in ai_text.strip().split("\n"):
+                        line = line.strip().lstrip("-*").strip()
+                        if line and len(line) > 5 and not line.startswith("{") and not line.startswith("}"):
+                            fallback_bullets.append(line)
+                            if len(fallback_bullets) >= 6:
+                                break
+                brand_analyses.append({
+                    "brand": own_brand,
+                    "analysis": None,
+                    "bullets": fallback_bullets,
+                })
+
+        result = {"brand_insights": brand_analyses, "generated_at": datetime.now(timezone.utc).isoformat()}
+
+        if brand_analyses:
+            set_cached_insight(cache_key, "combo_ai_v4", result)
 
         return {"has_data": True, "scrape_date": target, "insights": result, "cached": False}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _extract_bullets_from_combo_analysis(analysis: dict) -> list:
+    """Extract bullet-point summaries from structured combo analysis for backward-compatible display."""
+    bullets = []
+    if analysis.get("summary"):
+        bullets.append(analysis["summary"])
+    for gap in (analysis.get("combo_type_gaps") or [])[:4]:
+        priority = gap.get("priority", "")
+        rec = gap.get("recommendation", "")
+        price = gap.get("suggested_price")
+        if rec:
+            bullet = f"[{priority}] {rec}"
+            if price:
+                bullet += f" (~{price} AED)"
+            bullets.append(bullet)
+    for pg in (analysis.get("pricing_gaps") or [])[:2]:
+        action = pg.get("action", "")
+        if action:
+            bullets.append(action)
+    return bullets[:6]
 
 
 def _parse_brand_insights(ai_text: str, brand_names: list) -> list:
@@ -902,7 +1096,7 @@ async def menu_gap_ai_insights(scrape_date: str = None, force: bool = False):
             return {"has_data": False, "insights": None}
 
         target = gap_data["scrape_date"]
-        cache_key = f"menugap_ai_v2_{target}"
+        cache_key = f"menugap_ai_v3_{target}"
 
         if not force:
             cached = get_cached_insight(cache_key)
@@ -934,7 +1128,10 @@ async def menu_gap_ai_insights(scrape_date: str = None, force: bool = False):
                     continue
                 cat = get_category(data) or infer_category(name)
                 desc = get_description(data)[:50].replace("\n", " ")
-                own_by_cat[cat].append(f"{name} ({price} AED)")
+                if desc:
+                    own_by_cat[cat].append(f"{name} ({price} AED) - {desc}")
+                else:
+                    own_by_cat[cat].append(f"{name} ({price} AED)")
 
             own_summary = []
             for cat in sorted(own_by_cat.keys()):
@@ -954,21 +1151,17 @@ async def menu_gap_ai_insights(scrape_date: str = None, force: bool = False):
                         continue
                     cat = get_category(data) or infer_category(name)
                     desc = get_description(data)[:50].replace("\n", " ")
-                    comp_by_cat[cat].append(f"{name} ({price} AED)")
+                    if desc:
+                        comp_by_cat[cat].append(f"{name} ({price} AED) - {desc}")
+                    else:
+                        comp_by_cat[cat].append(f"{name} ({price} AED)")
 
                 comp_cats = []
                 for cat in sorted(comp_by_cat.keys()):
                     items = comp_by_cat[cat]
                     comp_cats.append(f"    {cat} ({len(items)}): {', '.join(items[:8])}")
 
-                # Categories competitor has that own brand doesn't
-                missing = set(comp_by_cat.keys()) - set(own_by_cat.keys())
                 missing_detail = ""
-                if missing:
-                    missing_items = []
-                    for m in sorted(missing):
-                        missing_items.append(f"{m}: {', '.join(comp_by_cat[m][:5])}")
-                    missing_detail = f"\n    MISSING from {own_brand}: " + "; ".join(missing_items)
 
                 comp_summaries.append(
                     f"  {comp} ({len(comp_items)} items):\n" + "\n".join(comp_cats[:15]) + missing_detail
@@ -985,8 +1178,10 @@ async def menu_gap_ai_insights(scrape_date: str = None, force: bool = False):
 
 {chr(10).join(brand_blocks)}
 
+IMPORTANT: When comparing categories between brands, use SEMANTIC matching — not exact string matching. Category names vary across brands (e.g. "Kids Meal" might appear under a parent category like "Operational Falafel > Kids Meal"). If a brand has items of a certain type under any category name, do NOT flag that type as missing. Focus on actual menu content and item descriptions, not category labels.
+
 For EACH own brand, write the brand name on its own line, then 3-5 bullet points below it. Each bullet must be one short actionable sentence with specific items, categories, or AED prices. Cover:
-- Missing food TYPES that competitors sell (e.g. seafood, keto, breakfast, desserts, vegetarian, kids meals)
+- Missing food TYPES that competitors sell (e.g. seafood, keto, breakfast, desserts, vegetarian, kids meals) — only flag as missing if the brand truly lacks those items, regardless of category naming
 - Specific items from competitors worth adding (name the item and price)
 - Category depth gaps (e.g. "Competitor has 15 pasta options vs your 3")
 - Protein or dietary gaps (missing chicken/beef/seafood/vegan options)
@@ -1009,7 +1204,7 @@ Keep each bullet under 20 words. No paragraphs. No bold. No asterisks. Just dash
         result = {"brand_insights": brand_insights, "generated_at": datetime.now(timezone.utc).isoformat()}
 
         if ai_text:
-            set_cached_insight(cache_key, "menugap_ai_v2", result)
+            set_cached_insight(cache_key, "menugap_ai_v3", result)
 
         return {"has_data": True, "scrape_date": target, "insights": result, "cached": False}
     except Exception as e:
