@@ -215,7 +215,25 @@ def parse_apify_items(menu_items: list) -> dict:
         else:
             continue
         if use_price > 0:
-            items[name] = use_price
+            image_url = str(mi.get("image", "")).replace("&amp;", "&").strip()
+            original_price_val = None
+            if orig is not None and price is not None:
+                try:
+                    p = float(price) if not isinstance(price, (int, float)) else price
+                    if p > 0 and p != use_price:
+                        original_price_val = use_price
+                        use_price = float(p)
+                except (ValueError, TypeError):
+                    pass
+            description = str(mi.get("description", "")).strip()
+            category = str(mi.get("categoryName", mi.get("category", ""))).strip()
+            items[name] = {
+                "price": use_price,
+                "original_price": original_price_val,
+                "description": description,
+                "category": category,
+                "image_url": image_url,
+            }
     return items
 
 def compare_items(baseline_items: Dict[str, Any], scrape_items: Dict[str, Any]) -> ComparisonStats:
@@ -509,9 +527,20 @@ async def get_items_history(brand_name: str):
             for scrape in scrapes:
                 raw_price = scrape["items"].get(item_name)
                 price_history.append({"date": scrape["scrape_date"], "price": get_price(raw_price) if raw_price is not None else None})
+            detail = get_item_detail(raw_baseline) if raw_baseline is not None else {}
+            latest_scrape_data = None
+            for scrape in reversed(scrapes):
+                raw = scrape["items"].get(item_name)
+                if raw is not None:
+                    latest_scrape_data = raw
+                    break
+            if latest_scrape_data is not None:
+                detail = get_item_detail(latest_scrape_data)
             items_history.append({
                 "item_name": item_name,
                 "baseline_price": baseline_price,
+                "image_url": detail.get("image_url", ""),
+                "category": detail.get("category", ""),
                 "history": price_history
             })
 
