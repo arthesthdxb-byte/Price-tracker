@@ -640,14 +640,15 @@ async def get_all_history():
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/npd")
-async def get_npd(target_date: str = None, baseline_date: str = None, latest_date: str = None):
+async def get_npd(target_date: str = None, baseline_date: str = None, latest_date: str = None, brand_filter: str = None):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cur.execute("SELECT scrape_date, brand_name, items FROM scrapes")
             all_scrapes = cur.fetchall()
-            cur.execute("SELECT own_brand FROM brand_groups")
-            own_brands = [r["own_brand"] for r in cur.fetchall()]
+            cur.execute("SELECT own_brand, competitors FROM brand_groups")
+            brand_group_rows = cur.fetchall()
+            own_brands = [r["own_brand"] for r in brand_group_rows]
             cur.close()
 
         if not all_scrapes:
@@ -711,6 +712,24 @@ async def get_npd(target_date: str = None, baseline_date: str = None, latest_dat
 
         brands_npd.sort(key=lambda x: (not x["is_own_brand"], -x["new_count"] - x["removed_count"]))
 
+        competitor_context = None
+        if brand_filter and brand_filter not in ('all', 'only_own', 'only_comp'):
+            related_competitors = []
+            for bg in brand_group_rows:
+                if bg["own_brand"] == brand_filter:
+                    related_competitors = bg.get("competitors") or []
+                    break
+                if bg.get("competitors") and brand_filter in bg["competitors"]:
+                    related_competitors = [bg["own_brand"]] + [c for c in (bg.get("competitors") or []) if c != brand_filter]
+                    break
+            if related_competitors:
+                comp_npd = [b for b in brands_npd if b["brand_name"] in related_competitors]
+                competitor_context = {
+                    "selected_brand": brand_filter,
+                    "competitors": related_competitors,
+                    "competitor_npd": comp_npd,
+                }
+
         return {
             "has_data": True,
             "latest_date": sel_latest,
@@ -720,6 +739,7 @@ async def get_npd(target_date: str = None, baseline_date: str = None, latest_dat
             "total_removed": sum(b["removed_count"] for b in brands_npd),
             "brands_with_changes": len(brands_npd),
             "available_dates": dates,
+            "competitor_context": competitor_context,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -801,6 +821,103 @@ async def get_npd_ai_summary(target_date: str = None, baseline_date: str = None,
     except HTTPException:
         raise
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/npd-brand-comparison")
+async def get_npd_brand_comparison(brand: str, baseline_date: str = None, latest_date: str = None):
+    try:
+        with get_db() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT scrape_date, brand_name, items FROM scrapes")
+            all_scrapes = cur.fetchall()
+            cur.execute("SELECT own_brand, competitors FROM brand_groups")
+            brand_group_rows = cur.fetchall()
+            cur.close()
+
+        own_brands = [r["own_brand"] for r in brand_group_rows]
+        dates = sorted(set(s["scrape_date"] for s in all_scrapes), key=parse_date_for_sorting)
+        if len(dates) < 2:
+            return {"success": False, "message": "Need at least 2 dates"}
+
+        sel_latest = latest_date if latest_date and latest_date in dates else dates[-1]
+        sel_baseline = baseline_date if baseline_date and baseline_date in dates else dates[-2]
+        if sel_baseline == sel_latest:
+            sel_baseline = dates[-2] if sel_latest == dates[-1] else dates[0]
+
+        related_brands = [brand]
+        for bg in brand_group_rows:
+            if bg["own_brand"] == brand:
+                related_brands.extend(bg.get("competitors") or [])
+                break
+            if bg.get("competitors") and brand in bg["competitors"]:
+                related_brands.append(bg["own_brand"])
+                related_brands.extend([c for c in (bg.get("competitors") or []) if c != brand])
+                break
+
+        latest_by_brand = {}
+        baseline_by_brand = {}
+        for scrape in all_scrapes:
+            if scrape["brand_name"] in related_brands:
+                if scrape["scrape_date"] == sel_latest:
+                    latest_by_brand[scrape["brand_name"]] = scrape["items"]
+                elif scrape["scrape_date"] == sel_baseline:
+                    baseline_by_brand[scrape["brand_name"]] = scrape["items"]
+
+        npd_data = []
+        for bn in related_brands:
+            sel_items = latest_by_brand.get(bn, {})
+            cmp_items = baseline_by_brand.get(bn, {})
+            new_names = set(sel_items.keys()) - set(cmp_items.keys())
+            removed_names = set(cmp_items.keys()) - set(sel_items.keys())
+            new_details = []
+            for name in new_names:
+                detail = get_item_detail(sel_items[name])
+                new_details.append({"name": name, "price": detail["price"], "category": detail.get("category", ""), "description": detail.get("description", "")[:100]})
+            removed_details = [{"name": name, "price": get_price(cmp_items[name])} for name in removed_names]
+            if new_details or removed_details:
+                npd_data.append({"brand": bn, "is_selected": bn == brand, "is_own_brand": bn in own_brands, "new_items": new_details, "removed_items": removed_details})
+
+        if not npd_data:
+            return {"success": True, "summary": "No NPD changes detected for this brand group.", "brand": brand}
+
+        prompt = f"""You are a competitive intelligence analyst for Talabat UAE restaurant brands.
+
+The user selected brand: "{brand}". Compare its NPD (New Product Development) changes with its competitors between {sel_baseline} and {sel_latest}.
+
+NPD Data:
+{json.dumps(npd_data, indent=2)}
+
+Provide a sharp competitive NPD comparison covering:
+1. What "{brand}" launched vs what competitors launched — are they keeping up, leading, or falling behind?
+2. Categories or product types competitors added that "{brand}" is missing (gaps/opportunities)
+3. Price positioning — are competitor new items priced above or below "{brand}"?
+4. Items removed by competitors that "{brand}" still has (potential advantage) or vice versa
+5. Actionable recommendations for "{brand}" based on competitor NPD activity
+
+Write in plain text only — no markdown, asterisks, bold, or headers. Keep it to 5-8 sentences. Be specific with item names and prices. Focus on actionable competitive insights."""
+
+        import httpx
+        api_key = os.environ.get('ANTHROPIC_API_KEY')
+        if not api_key:
+            return {"success": True, "summary": "AI key not configured.", "brand": brand}
+
+        async with httpx.AsyncClient() as http_client:
+            response = await http_client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                json={"model": "claude-sonnet-4-20250514", "max_tokens": 600, "messages": [{"role": "user", "content": prompt}]},
+                timeout=30.0
+            )
+            if response.status_code == 200:
+                result = response.json()
+                summary = result["content"][0]["text"]
+            else:
+                logger.error(f"Claude API error for NPD brand comparison: {response.status_code}")
+                summary = None
+
+        return {"success": True, "summary": summary, "brand": brand, "competitors": [b for b in related_brands if b != brand], "npd_data": npd_data}
+    except Exception as e:
+        logger.error(f"NPD brand comparison error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.post("/npd-ai-summary/regenerate")

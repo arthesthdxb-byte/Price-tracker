@@ -144,6 +144,8 @@ const Dashboard = () => {
   const [npdBaselineDate, setNpdBaselineDate] = useState('');
   const [npdLatestDate, setNpdLatestDate] = useState('');
   const [npdBrandFilter, setNpdBrandFilter] = useState('all');
+  const [npdBrandComparison, setNpdBrandComparison] = useState(null);
+  const [npdComparisonLoading, setNpdComparisonLoading] = useState(false);
 
   const allBrands = useMemo(() => brandGroups.flatMap(g => [g.own, ...g.competitors]), [brandGroups]);
 
@@ -376,6 +378,20 @@ const Dashboard = () => {
     setNpdLoading(false);
   };
 
+  const loadNpdBrandComparison = async (brand) => {
+    if (!brand || brand === 'all' || brand === 'only_own' || brand === 'only_comp') {
+      setNpdBrandComparison(null);
+      return;
+    }
+    setNpdComparisonLoading(true);
+    setNpdBrandComparison(null);
+    try {
+      const res = await axios.get(`${API}/npd-brand-comparison?brand=${encodeURIComponent(brand)}&baseline_date=${npdBaselineDate}&latest_date=${npdLatestDate}`);
+      setNpdBrandComparison(res.data);
+    } catch (err) { console.error('Error loading brand comparison:', err); }
+    setNpdComparisonLoading(false);
+  };
+
   const regenerateNpdSummary = async () => {
     setNpdSummaryLoading(true);
     try {
@@ -599,19 +615,30 @@ const Dashboard = () => {
               {(() => {
                 const ownBrandNames = brandGroups.map(g => g.own);
                 const compBrandNames = brandGroups.flatMap(g => g.competitors);
+                const getRelatedBrands = (brandName) => {
+                  for (const g of brandGroups) {
+                    if (g.own === brandName) return [g.own, ...g.competitors];
+                    if (g.competitors.includes(brandName)) return [g.own, ...g.competitors];
+                  }
+                  return [brandName];
+                };
+                const isSpecificBrand = npdBrandFilter !== 'all' && npdBrandFilter !== 'only_own' && npdBrandFilter !== 'only_comp';
+                const relatedBrandNames = isSpecificBrand ? getRelatedBrands(npdBrandFilter) : [];
                 const filteredNpdBrands = npdData.brands.filter(b => {
                   if (npdBrandFilter === 'all') return true;
                   if (npdBrandFilter === 'only_own') return ownBrandNames.includes(b.brand_name);
                   if (npdBrandFilter === 'only_comp') return compBrandNames.includes(b.brand_name);
-                  return b.brand_name === npdBrandFilter;
+                  return relatedBrandNames.includes(b.brand_name);
                 });
+                const selectedBrandNpd = isSpecificBrand ? filteredNpdBrands.filter(b => b.brand_name === npdBrandFilter) : [];
+                const competitorNpdBrands = isSpecificBrand ? filteredNpdBrands.filter(b => b.brand_name !== npdBrandFilter) : [];
                 const filteredNew = filteredNpdBrands.reduce((s, b) => s + b.new_count, 0);
                 const filteredRemoved = filteredNpdBrands.reduce((s, b) => s + b.removed_count, 0);
                 return (<>
               <div style={{ ...cardStyle, padding: 16, marginBottom: 24 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 13, color: T.label, fontWeight: 600 }}>Brand:</span>
-                  <select value={npdBrandFilter} onChange={(e) => setNpdBrandFilter(e.target.value)}
+                  <select value={npdBrandFilter} onChange={(e) => { setNpdBrandFilter(e.target.value); loadNpdBrandComparison(e.target.value); }}
                     style={{ padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.body, background: '#FFF', cursor: 'pointer', minWidth: 220 }}>
                     <option value="all">All Brands</option>
                     <option value="only_own">Only Own Brands</option>
@@ -636,6 +663,37 @@ const Dashboard = () => {
                 <KpiCard label="Brands with Changes" value={filteredNpdBrands.length} color={T.primary} />
               </div>
 
+              {npdBrandFilter && npdBrandFilter !== 'all' && npdBrandFilter !== 'only_own' && npdBrandFilter !== 'only_comp' && (
+                <div style={{ ...cardStyle, padding: 20, marginBottom: 24, borderLeft: `4px solid ${T.primary}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <h3 style={{ margin: 0, color: T.title, fontSize: 16, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Target size={16} color={T.primary} /> Competitive NPD Comparison — {npdBrandFilter}
+                    </h3>
+                    <button onClick={() => loadNpdBrandComparison(npdBrandFilter)} disabled={npdComparisonLoading}
+                      style={{ ...headerBtnStyle, fontSize: 12, padding: '6px 12px' }}>
+                      <RefreshCw size={12} className={npdComparisonLoading ? 'animate-spin' : ''} /> {npdComparisonLoading ? 'Analyzing...' : 'Refresh Analysis'}
+                    </button>
+                  </div>
+                  {npdComparisonLoading ? (
+                    <div style={{ color: T.label, fontSize: 14, padding: '12px 0' }}>Generating competitive NPD analysis...</div>
+                  ) : npdBrandComparison?.summary ? (
+                    <>
+                      <div style={{ color: T.body, fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap', marginBottom: 16 }}>{npdBrandComparison.summary}</div>
+                      {npdBrandComparison.competitors?.length > 0 && (
+                        <div style={{ fontSize: 12, color: T.label, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 600 }}>Compared with:</span>
+                          {npdBrandComparison.competitors.map(c => (
+                            <span key={c} style={{ padding: '2px 10px', borderRadius: 12, background: T.compBadgeBg, color: T.compBadgeText, fontSize: 11, fontWeight: 600 }}>{c}</span>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ color: T.label, fontSize: 14 }}>Select a brand to see competitive NPD comparison with its competitors.</div>
+                  )}
+                </div>
+              )}
+
               <div style={{ ...cardStyle, padding: 20, marginBottom: 24 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                   <h3 style={{ margin: 0, color: T.title, fontSize: 16, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -654,7 +712,78 @@ const Dashboard = () => {
                 )}
               </div>
 
-              {filteredNpdBrands.map((brand, idx) => (
+              {isSpecificBrand && competitorNpdBrands.length > 0 && selectedBrandNpd.length > 0 && (
+                <>
+                  {selectedBrandNpd.map((brand, idx) => (
+                    <div key={`sel-${idx}`} style={{ ...cardStyle, padding: 20, marginBottom: 16, borderLeft: `4px solid ${T.primary}` }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                        <h3 style={{ margin: 0, color: T.title, fontSize: 16, fontWeight: 600 }}>{brand.brand_name}</h3>
+                        <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 12, fontWeight: 600, background: T.ownBadgeBg, color: T.ownBadgeText }}>SELECTED</span>
+                        {brand.new_count > 0 && <span style={{ fontSize: 12, padding: '2px 10px', borderRadius: 12, background: 'rgba(66,165,245,0.15)', color: T.newItem, fontWeight: 600 }}>{brand.new_count} new</span>}
+                        {brand.removed_count > 0 && <span style={{ fontSize: 12, padding: '2px 10px', borderRadius: 12, background: 'rgba(255,167,38,0.15)', color: T.removed, fontWeight: 600 }}>{brand.removed_count} removed</span>}
+                      </div>
+                      {brand.new_items.length > 0 && (
+                        <div style={{ marginBottom: 16 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: T.newItem, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><TrendingUp size={14} /> New Items Launched</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
+                            {brand.new_items.map((item, iIdx) => <NpdItemCard key={iIdx} item={item} type="new" />)}
+                          </div>
+                        </div>
+                      )}
+                      {brand.removed_items.length > 0 && (
+                        <div>
+                          <button onClick={() => toggleRemovedBrand(brand.brand_name)} style={{ background: 'none', border: `1px solid ${T.border}`, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: T.removed, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {expandedRemovedBrands[brand.brand_name] ? <EyeOff size={14} /> : <Eye size={14} />}
+                            {expandedRemovedBrands[brand.brand_name] ? 'Hide' : 'Show'} Removed Items ({brand.removed_count})
+                          </button>
+                          {expandedRemovedBrands[brand.brand_name] && (
+                            <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
+                              {brand.removed_items.map((item, iIdx) => <NpdItemCard key={iIdx} item={item} type="removed" />)}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '24px 0 16px' }}>
+                    <div style={{ flex: 1, height: 1, background: T.border }} />
+                    <span style={{ fontSize: 14, fontWeight: 700, color: T.label, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Competitor NPD Activity</span>
+                    <div style={{ flex: 1, height: 1, background: T.border }} />
+                  </div>
+                  {competitorNpdBrands.map((brand, idx) => (
+                    <div key={`comp-${idx}`} style={{ ...cardStyle, padding: 20, marginBottom: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                        <h3 style={{ margin: 0, color: T.title, fontSize: 16, fontWeight: 600 }}>{brand.brand_name}</h3>
+                        <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 12, fontWeight: 600, background: T.compBadgeBg, color: T.compBadgeText }}>COMP</span>
+                        {brand.new_count > 0 && <span style={{ fontSize: 12, padding: '2px 10px', borderRadius: 12, background: 'rgba(66,165,245,0.15)', color: T.newItem, fontWeight: 600 }}>{brand.new_count} new</span>}
+                        {brand.removed_count > 0 && <span style={{ fontSize: 12, padding: '2px 10px', borderRadius: 12, background: 'rgba(255,167,38,0.15)', color: T.removed, fontWeight: 600 }}>{brand.removed_count} removed</span>}
+                      </div>
+                      {brand.new_items.length > 0 && (
+                        <div style={{ marginBottom: 16 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: T.newItem, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><TrendingUp size={14} /> New Items Launched</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
+                            {brand.new_items.map((item, iIdx) => <NpdItemCard key={iIdx} item={item} type="new" />)}
+                          </div>
+                        </div>
+                      )}
+                      {brand.removed_items.length > 0 && (
+                        <div>
+                          <button onClick={() => toggleRemovedBrand(brand.brand_name)} style={{ background: 'none', border: `1px solid ${T.border}`, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: T.removed, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {expandedRemovedBrands[brand.brand_name] ? <EyeOff size={14} /> : <Eye size={14} />}
+                            {expandedRemovedBrands[brand.brand_name] ? 'Hide' : 'Show'} Removed Items ({brand.removed_count})
+                          </button>
+                          {expandedRemovedBrands[brand.brand_name] && (
+                            <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
+                              {brand.removed_items.map((item, iIdx) => <NpdItemCard key={iIdx} item={item} type="removed" />)}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </>
+              )}
+              {(!isSpecificBrand || competitorNpdBrands.length === 0) && filteredNpdBrands.map((brand, idx) => (
                 <div key={idx} style={{ ...cardStyle, padding: 20, marginBottom: 16 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
                     <h3 style={{ margin: 0, color: T.title, fontSize: 16, fontWeight: 600 }}>{brand.brand_name}</h3>
