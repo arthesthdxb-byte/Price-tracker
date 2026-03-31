@@ -396,7 +396,7 @@ async def match_competitor_items(own_brand: str, item_name: str):
         comp_items_summary = {}
         for comp, items in competitor_items_map.items():
             comp_items_summary[comp] = [
-                {"name": n, "price": get_item_price(d)} for n, d in items.items()
+                {"name": n, "price": get_item_price(d), "description": get_item_detail(d).get("description", "")[:100]} for n, d in items.items()
             ]
 
         prompt = f"""You are a menu item matching expert for food/restaurant brands in the UAE.
@@ -411,6 +411,14 @@ Find the BEST matching item from each competitor brand below. Match items that a
 
 Competitor menus:
 {json.dumps(comp_items_summary, indent=2)}
+
+CRITICAL MATCHING RULES:
+- Read the item descriptions carefully to understand what the item actually is
+- Size/portion matters: NEVER match different sizes (e.g., "Large Pizza" should NOT match "Small Pizza" or "Medium Pizza"). Only match the SAME size or closest equivalent size
+- "Regular", "Small", "Medium", "Large", "Family", "Party" etc. are DIFFERENT items — do not cross-match sizes
+- Match the actual dish/product, not just the category (e.g., "Chicken Burger" should NOT match "Beef Burger")
+- If an item specifies a quantity (e.g., "6 pcs", "12 pcs"), only match the same quantity
+- Pay attention to variants: "Spicy" vs "Classic" vs "BBQ" are different items unless the core product is clearly the same
 
 Return a JSON array of matches. For each competitor, return the single best match (or skip if no reasonable match exists). Format:
 [{{"competitor_brand": "BrandName", "matched_item_name": "exact item name from their menu", "match_confidence": 0.0-1.0}}]
@@ -610,7 +618,7 @@ async def bulk_match_brand(own_brand: str):
             comp_items_summary = {}
             for comp, items in competitor_items_map.items():
                 comp_items_summary[comp] = [
-                    {"name": n, "price": get_item_price(d)} for n, d in items.items()
+                    {"name": n, "price": get_item_price(d), "description": get_item_detail(d).get("description", "")[:100]} for n, d in items.items()
                 ]
 
             BATCH_SIZE = 15
@@ -619,7 +627,7 @@ async def bulk_match_brand(own_brand: str):
                     await asyncio.sleep(2)
                 batch = items_needing_match[i:i + BATCH_SIZE]
                 items_block = "\n".join(
-                    f'{idx+1}. "{it["name"]}" | AED {it["detail"]["price"]} | Category: "{it["detail"].get("category", "")}" | Desc: "{it["detail"].get("description", "")[:80]}"'
+                    f'{idx+1}. "{it["name"]}" | AED {it["detail"]["price"]} | Category: "{it["detail"].get("category", "")}" | Desc: "{it["detail"].get("description", "")[:100]}"'
                     for idx, it in enumerate(batch)
                 )
 
@@ -639,7 +647,13 @@ Return a JSON object where keys are the own item names (exactly as given) and va
   ...
 }}
 
-Rules:
+CRITICAL MATCHING RULES:
+- Read the item descriptions carefully to understand what the item actually is
+- Size/portion matters: NEVER match different sizes (e.g., "Large Pizza" should NOT match "Small Pizza" or "Medium Pizza"). Only match the SAME size or closest equivalent size
+- "Regular", "Small", "Medium", "Large", "Family", "Party" etc. are DIFFERENT items — do not cross-match sizes
+- Match the actual dish/product, not just the category (e.g., "Chicken Burger" should NOT match "Beef Burger")
+- If an item specifies a quantity (e.g., "6 pcs", "12 pcs"), only match the same quantity
+- Pay attention to variants: "Spicy" vs "Classic" vs "BBQ" are different items unless the core product is clearly the same
 - Only match truly similar items (confidence >= 0.5)
 - Use EXACT item names from competitor menus
 - Skip items with no good match (empty array)
