@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, RefreshCw, Download, X, Settings, ChevronDown, ChevronRight, Plus, Trash2, Edit2, Save, Package, Eye, EyeOff, Sparkles, TrendingUp, Target, Layers, DollarSign } from 'lucide-react';
+import { Upload, RefreshCw, Download, X, Settings, ChevronDown, ChevronRight, Plus, Trash2, Edit2, Save, Package, Eye, EyeOff, Sparkles, TrendingUp, Target, Layers, DollarSign, Link, AlertCircle, Search } from 'lucide-react';
 import { ComboInsightsView, MenuGapAnalyzerView } from '../pages/InsightsViews';
 import { CompetitorPriceCheckView } from '../pages/CompetitorPriceCheck';
 import { Button } from './ui/button';
@@ -147,6 +147,13 @@ const Dashboard = () => {
   const [npdBrandFilter, setNpdBrandFilter] = useState('all');
   const [npdBrandComparison, setNpdBrandComparison] = useState(null);
   const [npdComparisonLoading, setNpdComparisonLoading] = useState(false);
+  const [slugMappings, setSlugMappings] = useState([]);
+  const [slugSearch, setSlugSearch] = useState('');
+  const [newSlug, setNewSlug] = useState('');
+  const [newSlugBrand, setNewSlugBrand] = useState('');
+  const [editingSlug, setEditingSlug] = useState(null);
+  const [editSlugBrand, setEditSlugBrand] = useState('');
+  const [manageBrandsTab, setManageBrandsTab] = useState('groups');
 
   const allBrands = useMemo(() => brandGroups.flatMap(g => [g.own, ...g.competitors]), [brandGroups]);
 
@@ -437,6 +444,42 @@ const Dashboard = () => {
       await axios.delete(`${API}/brand-groups/${encodeURIComponent(ownBrand)}`);
       toast.success(`Deleted ${ownBrand}`); await loadBrandGroups(); await loadDashboard();
     } catch (error) { toast.error('Error deleting brand group'); }
+  };
+
+  const loadSlugMappings = async () => {
+    try {
+      const response = await axios.get(`${API}/slug-mappings`);
+      setSlugMappings(response.data.mappings || []);
+    } catch (error) { console.error('Error loading slug mappings:', error); }
+  };
+
+  const handleAddSlugMapping = async () => {
+    if (!newSlug.trim() || !newSlugBrand.trim()) { toast.error('Enter both slug and brand name'); return; }
+    try {
+      await axios.post(`${API}/slug-mappings`, { slug: newSlug.trim(), brand_name: newSlugBrand.trim() });
+      toast.success(`Added mapping: ${newSlug.trim()}`);
+      setNewSlug(''); setNewSlugBrand('');
+      await loadSlugMappings();
+    } catch (error) { toast.error('Error adding slug mapping'); }
+  };
+
+  const handleUpdateSlugMapping = async (slug) => {
+    if (!editSlugBrand.trim()) { toast.error('Brand name cannot be empty'); return; }
+    try {
+      await axios.put(`${API}/slug-mappings/${encodeURIComponent(slug)}`, { brand_name: editSlugBrand.trim() });
+      toast.success(`Updated mapping for ${slug}`);
+      setEditingSlug(null);
+      await loadSlugMappings();
+    } catch (error) { toast.error('Error updating slug mapping'); }
+  };
+
+  const handleDeleteSlugMapping = async (slug) => {
+    if (!window.confirm(`Delete slug mapping "${slug}"?`)) return;
+    try {
+      await axios.delete(`${API}/slug-mappings/${encodeURIComponent(slug)}`);
+      toast.success(`Deleted mapping: ${slug}`);
+      await loadSlugMappings();
+    } catch (error) { toast.error('Error deleting slug mapping'); }
   };
 
   const toggleSummary = (key) => setExpandedSummaries(prev => ({ ...prev, [key]: !prev[key] }));
@@ -1289,44 +1332,110 @@ const Dashboard = () => {
 
       {showManageBrands && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, zIndex: 50 }}>
-          <div style={{ ...cardStyle, padding: 24, width: '100%', maxWidth: 700, maxHeight: '80vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 700, color: T.title, margin: 0 }}>Manage Brand Groups</h2>
+          <div style={{ ...cardStyle, padding: 24, width: '100%', maxWidth: 750, maxHeight: '85vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 700, color: T.title, margin: 0 }}>Settings</h2>
               <button onClick={() => setShowManageBrands(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.label }}><X size={20} /></button>
             </div>
-            <div style={{ marginBottom: 20, padding: 16, background: T.tableAltRow, borderRadius: 10 }}>
-              <h3 style={{ color: T.title, fontWeight: 600, fontSize: 15, margin: '0 0 12px' }}>Add New Brand Group</h3>
-              <input type="text" placeholder="Own brand name" value={newBrandOwn} onChange={(e) => setNewBrandOwn(e.target.value)}
-                style={{ width: '100%', padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, marginBottom: 8, fontSize: 14, color: T.body }} />
-              <input type="text" placeholder="Competitors (comma-separated)" value={newBrandCompetitors} onChange={(e) => setNewBrandCompetitors(e.target.value)}
-                style={{ width: '100%', padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, marginBottom: 8, fontSize: 14, color: T.body }} />
-              <button onClick={handleAddBrandGroup} style={{ ...headerBtnAccent, padding: '8px 16px' }}><Plus size={14} /> Add Group</button>
+            <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: `2px solid ${T.divider}` }}>
+              {[{ key: 'groups', label: 'Brand Groups', icon: <Layers size={14} /> }, { key: 'slugs', label: 'Slug Mappings', icon: <Link size={14} /> }].map(tab => (
+                <button key={tab.key} onClick={() => { setManageBrandsTab(tab.key); if (tab.key === 'slugs' && slugMappings.length === 0) loadSlugMappings(); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 20px', border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 600,
+                    color: manageBrandsTab === tab.key ? T.primary : T.label,
+                    borderBottom: manageBrandsTab === tab.key ? `2px solid ${T.primary}` : '2px solid transparent',
+                    background: 'none', marginBottom: -2 }}>
+                  {tab.icon} {tab.label}
+                </button>
+              ))}
             </div>
-            {brandGroups.map((group, idx) => (
-              <div key={idx} style={{ ...cardStyle, padding: 16, marginBottom: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div>
-                    <span style={{ fontWeight: 600, color: T.body }}>{group.own}</span>
-                    <span style={{ marginLeft: 8, fontSize: 11, padding: '2px 10px', borderRadius: 12, background: T.ownBadgeBg, color: T.ownBadgeText, fontWeight: 600 }}>OWN</span>
+            {manageBrandsTab === 'groups' && (
+              <>
+                <div style={{ marginBottom: 20, padding: 16, background: T.tableAltRow, borderRadius: 10 }}>
+                  <h3 style={{ color: T.title, fontWeight: 600, fontSize: 15, margin: '0 0 12px' }}>Add New Brand Group</h3>
+                  <input type="text" placeholder="Own brand name" value={newBrandOwn} onChange={(e) => setNewBrandOwn(e.target.value)}
+                    style={{ width: '100%', padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, marginBottom: 8, fontSize: 14, color: T.body }} />
+                  <input type="text" placeholder="Competitors (comma-separated)" value={newBrandCompetitors} onChange={(e) => setNewBrandCompetitors(e.target.value)}
+                    style={{ width: '100%', padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, marginBottom: 8, fontSize: 14, color: T.body }} />
+                  <button onClick={handleAddBrandGroup} style={{ ...headerBtnAccent, padding: '8px 16px' }}><Plus size={14} /> Add Group</button>
+                </div>
+                {brandGroups.map((group, idx) => (
+                  <div key={idx} style={{ ...cardStyle, padding: 16, marginBottom: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <span style={{ fontWeight: 600, color: T.body }}>{group.own}</span>
+                        <span style={{ marginLeft: 8, fontSize: 11, padding: '2px 10px', borderRadius: 12, background: T.ownBadgeBg, color: T.ownBadgeText, fontWeight: 600 }}>OWN</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button onClick={() => { setEditingBrand(group.own); setEditCompetitors(group.competitors.join(', ')); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.primary }}><Edit2 size={14} /></button>
+                        <button onClick={() => handleDeleteBrandGroup(group.own)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.priceUp }}><Trash2 size={14} /></button>
+                      </div>
+                    </div>
+                    {editingBrand === group.own ? (
+                      <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                        <input type="text" value={editCompetitors} onChange={(e) => setEditCompetitors(e.target.value)}
+                          style={{ flex: 1, padding: '6px 10px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.body }} />
+                        <button onClick={() => handleUpdateBrandGroup(group.own)} style={{ ...headerBtnAccent, padding: '6px 12px', fontSize: 12 }}><Save size={12} /> Save</button>
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 4, color: T.label, fontSize: 13 }}>
+                        {group.competitors.length > 0 ? group.competitors.join(', ') : 'No competitors'}
+                      </div>
+                    )}
                   </div>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    <button onClick={() => { setEditingBrand(group.own); setEditCompetitors(group.competitors.join(', ')); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.primary }}><Edit2 size={14} /></button>
-                    <button onClick={() => handleDeleteBrandGroup(group.own)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.priceUp }}><Trash2 size={14} /></button>
+                ))}
+              </>
+            )}
+            {manageBrandsTab === 'slugs' && (
+              <>
+                <div style={{ marginBottom: 16, padding: 16, background: T.tableAltRow, borderRadius: 10 }}>
+                  <h3 style={{ color: T.title, fontWeight: 600, fontSize: 15, margin: '0 0 12px' }}>Add New Slug Mapping</h3>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input type="text" placeholder="Talabat URL slug" value={newSlug} onChange={(e) => setNewSlug(e.target.value)}
+                      style={{ flex: 1, padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 14, color: T.body }} />
+                    <input type="text" placeholder="Brand name" value={newSlugBrand} onChange={(e) => setNewSlugBrand(e.target.value)}
+                      style={{ flex: 1, padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 14, color: T.body }} />
+                    <button onClick={handleAddSlugMapping} style={{ ...headerBtnAccent, padding: '8px 16px', whiteSpace: 'nowrap' }}><Plus size={14} /> Add</button>
                   </div>
                 </div>
-                {editingBrand === group.own ? (
-                  <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-                    <input type="text" value={editCompetitors} onChange={(e) => setEditCompetitors(e.target.value)}
-                      style={{ flex: 1, padding: '6px 10px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, color: T.body }} />
-                    <button onClick={() => handleUpdateBrandGroup(group.own)} style={{ ...headerBtnAccent, padding: '6px 12px', fontSize: 12 }}><Save size={12} /> Save</button>
-                  </div>
-                ) : (
-                  <div style={{ marginTop: 4, color: T.label, fontSize: 13 }}>
-                    {group.competitors.length > 0 ? group.competitors.join(', ') : 'No competitors'}
-                  </div>
-                )}
-              </div>
-            ))}
+                <div style={{ marginBottom: 12, position: 'relative' }}>
+                  <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.label }} />
+                  <input type="text" placeholder="Search slugs or brand names..." value={slugSearch} onChange={(e) => setSlugSearch(e.target.value)}
+                    style={{ width: '100%', padding: '8px 12px 8px 32px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 14, color: T.body }} />
+                </div>
+                <div style={{ fontSize: 12, color: T.label, marginBottom: 8 }}>{slugMappings.length} mapping{slugMappings.length !== 1 ? 's' : ''} total</div>
+                <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                  {slugMappings
+                    .filter(m => !slugSearch || m.slug.toLowerCase().includes(slugSearch.toLowerCase()) || m.brand_name.toLowerCase().includes(slugSearch.toLowerCase()))
+                    .map((mapping) => (
+                    <div key={mapping.slug} style={{ ...cardStyle, padding: 12, marginBottom: 6, borderLeft: mapping.auto_registered ? `3px solid ${T.newItem}` : `3px solid ${T.primary}` }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, color: T.label, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mapping.slug}</div>
+                          {editingSlug === mapping.slug ? (
+                            <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                              <input type="text" value={editSlugBrand} onChange={(e) => setEditSlugBrand(e.target.value)}
+                                style={{ flex: 1, padding: '4px 8px', border: `1px solid ${T.border}`, borderRadius: 6, fontSize: 13, color: T.body }}
+                                onKeyDown={(e) => e.key === 'Enter' && handleUpdateSlugMapping(mapping.slug)} />
+                              <button onClick={() => handleUpdateSlugMapping(mapping.slug)} style={{ ...headerBtnAccent, padding: '4px 10px', fontSize: 12 }}><Save size={12} /></button>
+                              <button onClick={() => setEditingSlug(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.label, fontSize: 12 }}><X size={12} /></button>
+                            </div>
+                          ) : (
+                            <div style={{ fontWeight: 600, color: T.body, fontSize: 14, marginTop: 2 }}>{mapping.brand_name}</div>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 8 }}>
+                          {mapping.auto_registered && (
+                            <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 8, background: 'rgba(66,165,245,0.15)', color: T.newItem, fontWeight: 600 }}>AUTO</span>
+                          )}
+                          <button onClick={() => { setEditingSlug(mapping.slug); setEditSlugBrand(mapping.brand_name); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.primary }}><Edit2 size={13} /></button>
+                          <button onClick={() => handleDeleteSlugMapping(mapping.slug)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.priceUp }}><Trash2 size={13} /></button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import os
+import re
 import logging
 import json
 from pathlib import Path
@@ -133,7 +134,7 @@ class BrandGroupUpdate(BaseModel):
 class NewBrandsData(BaseModel):
     brands: Dict[str, Dict[str, Any]]
 
-SLUG_TO_BRAND = {
+_SEED_SLUG_TO_BRAND = {
     "operation-falafel-downtown-burj-khalifa": "Operational Falafel",
     "sushido": "Sushi DO",
     "right-bite": "Right Bite",
@@ -177,6 +178,63 @@ SLUG_TO_BRAND = {
     "jones-the-grocer2": "Jones the Grocer",
     "parkers-al-mushrif": "Parkers",
 }
+
+_slug_cache: Dict[str, str] = {}
+_slug_cache_loaded = False
+
+def _load_slug_cache():
+    global _slug_cache, _slug_cache_loaded
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT slug, brand_name FROM slug_mappings")
+            _slug_cache = {row[0]: row[1] for row in cur.fetchall()}
+    _slug_cache_loaded = True
+
+def get_brand_for_slug(slug: str) -> Optional[str]:
+    global _slug_cache_loaded
+    if not _slug_cache_loaded:
+        _load_slug_cache()
+    return _slug_cache.get(slug)
+
+def invalidate_slug_cache():
+    global _slug_cache_loaded
+    _slug_cache_loaded = False
+    _slug_cache.clear()
+
+LOCATION_SUFFIXES = [
+    "downtown-burj-khalifa", "business-bay", "dubai-marina", "dubai-hills",
+    "jumeirah-lakes-towers-jlt", "jlt", "difc", "al-quoz", "al-satwa",
+    "dubai-silicon-oasis", "dubai-land", "al-badaa-city-walk", "um-al-sheif",
+    "al-mushrif", "bay-square", "city-walk",
+]
+
+def slug_to_display_name(slug: str) -> str:
+    name = slug
+    for suffix in sorted(LOCATION_SUFFIXES, key=len, reverse=True):
+        if name.endswith("-" + suffix):
+            name = name[: -(len(suffix) + 1)]
+            break
+    name = re.sub(r'-\d+$', '', name)
+    name = re.sub(r'\d+$', '', name)
+    parts = name.split("-")
+    parts = [p for p in parts if p]
+    return " ".join(p.capitalize() for p in parts) if parts else slug
+
+def auto_register_slug(slug: str) -> str:
+    brand_name = slug_to_display_name(slug)
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO slug_mappings (slug, brand_name, auto_registered) VALUES (%s, %s, TRUE) ON CONFLICT (slug) DO NOTHING RETURNING brand_name",
+                (slug, brand_name)
+            )
+            row = cur.fetchone()
+    if row:
+        _slug_cache[slug] = row[0]
+        logger.info(f"[Slug] Auto-registered: {slug} -> {brand_name}")
+        return row[0]
+    existing = get_brand_for_slug(slug)
+    return existing or brand_name
 
 def get_apify_token() -> str:
     raw = os.environ.get("APIFY_TOKEN", "")
@@ -1343,21 +1401,23 @@ async def apify_pull(dataset_id: str = None, token: str = None, run_id: str = No
         logger.info(f"[Apify Pull] Fetched {len(jsonl_records)} records from dataset {dataset_id}")
 
         brands = {}
-        unmatched_slugs = []
         skipped_empty = []
+        auto_registered = []
 
         for record in jsonl_records:
             url = record.get("url", "")
             slug = extract_slug(url)
+            if not slug or not re.match(r'^[a-z0-9][a-z0-9-]*$', slug):
+                skipped_empty.append(slug or "(empty)")
+                continue
             menu_items = record.get("menuItems", [])
             if not menu_items:
                 skipped_empty.append(slug)
                 continue
-            brand_name = SLUG_TO_BRAND.get(slug)
+            brand_name = get_brand_for_slug(slug)
             if not brand_name:
-                unmatched_slugs.append(slug)
-                logger.warning(f"[Apify] Unmatched slug: {slug}")
-                continue
+                brand_name = auto_register_slug(slug)
+                auto_registered.append({"slug": slug, "brand_name": brand_name})
             items = parse_apify_items(menu_items)
             if items:
                 if brand_name in brands:
@@ -1366,7 +1426,7 @@ async def apify_pull(dataset_id: str = None, token: str = None, run_id: str = No
                     brands[brand_name] = items
 
         if not brands:
-            return {"success": False, "error": "No valid brands parsed", "unmatched_slugs": unmatched_slugs}
+            return {"success": False, "error": "No valid brands parsed", "skipped_empty": skipped_empty}
 
         scrape_payload = ScrapeUpload(scrape_date=scrape_date, brands=brands, set_as_baseline=False)
         result = await upload_scrape(scrape_payload)
@@ -1376,7 +1436,7 @@ async def apify_pull(dataset_id: str = None, token: str = None, run_id: str = No
             "scrape_date": scrape_date,
             "brands_parsed": len(brands),
             "total_items": sum(len(v) for v in brands.values()),
-            "unmatched_slugs": unmatched_slugs,
+            "auto_registered": auto_registered,
             "skipped_empty": skipped_empty,
             "scrape_result": result
         }
@@ -1422,21 +1482,23 @@ async def apify_webhook(request: Request):
             raise HTTPException(status_code=400, detail="Invalid payload")
 
         brands = {}
-        unmatched_slugs = []
         skipped_empty = []
+        auto_registered = []
 
         for record in jsonl_records:
             url = record.get("url", "")
             slug = extract_slug(url)
+            if not slug or not re.match(r'^[a-z0-9][a-z0-9-]*$', slug):
+                skipped_empty.append(slug or "(empty)")
+                continue
             menu_items = record.get("menuItems", [])
             if not menu_items:
                 skipped_empty.append(slug)
                 continue
-            brand_name = SLUG_TO_BRAND.get(slug)
+            brand_name = get_brand_for_slug(slug)
             if not brand_name:
-                unmatched_slugs.append(slug)
-                logger.warning(f"[Apify] Unmatched slug: {slug}")
-                continue
+                brand_name = auto_register_slug(slug)
+                auto_registered.append({"slug": slug, "brand_name": brand_name})
             items = parse_apify_items(menu_items)
             if items:
                 if brand_name in brands:
@@ -1445,7 +1507,7 @@ async def apify_webhook(request: Request):
                     brands[brand_name] = items
 
         if not brands:
-            return {"success": False, "error": "No valid brands parsed", "unmatched_slugs": unmatched_slugs, "skipped_empty": skipped_empty}
+            return {"success": False, "error": "No valid brands parsed", "skipped_empty": skipped_empty}
 
         logger.info(f"[Apify] Parsed {len(brands)} brands, {sum(len(v) for v in brands.values())} total items")
 
@@ -1457,7 +1519,7 @@ async def apify_webhook(request: Request):
             "scrape_date": scrape_date,
             "brands_parsed": len(brands),
             "total_items": sum(len(v) for v in brands.values()),
-            "unmatched_slugs": unmatched_slugs,
+            "auto_registered": auto_registered,
             "skipped_empty": skipped_empty,
             "scrape_result": result
         }
@@ -1466,6 +1528,58 @@ async def apify_webhook(request: Request):
     except Exception as e:
         logger.error(f"[Apify Webhook] Error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/slug-mappings")
+async def list_slug_mappings():
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT slug, brand_name, auto_registered, created_at FROM slug_mappings ORDER BY created_at DESC")
+            rows = cur.fetchall()
+    return {"mappings": [{"slug": r[0], "brand_name": r[1], "auto_registered": r[2], "created_at": r[3].isoformat() if r[3] else None} for r in rows]}
+
+@api_router.post("/slug-mappings")
+async def create_slug_mapping(request: Request):
+    body = await request.json()
+    slug = body.get("slug", "").strip().lower()
+    brand_name = body.get("brand_name", "").strip()
+    if not slug or not brand_name:
+        raise HTTPException(status_code=400, detail="slug and brand_name are required")
+    if not re.match(r'^[a-z0-9][a-z0-9-]*$', slug):
+        raise HTTPException(status_code=400, detail="Invalid slug format")
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO slug_mappings (slug, brand_name, auto_registered) VALUES (%s, %s, FALSE) ON CONFLICT (slug) DO UPDATE SET brand_name = EXCLUDED.brand_name RETURNING slug",
+                (slug, brand_name)
+            )
+    invalidate_slug_cache()
+    return {"success": True, "slug": slug, "brand_name": brand_name}
+
+@api_router.put("/slug-mappings/{slug:path}")
+async def update_slug_mapping(slug: str, request: Request):
+    body = await request.json()
+    brand_name = body.get("brand_name", "").strip()
+    if not brand_name:
+        raise HTTPException(status_code=400, detail="brand_name is required")
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE slug_mappings SET brand_name = %s WHERE slug = %s RETURNING slug", (brand_name, slug))
+            row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Slug mapping not found")
+    invalidate_slug_cache()
+    return {"success": True, "slug": slug, "brand_name": brand_name}
+
+@api_router.delete("/slug-mappings/{slug:path}")
+async def delete_slug_mapping(slug: str):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM slug_mappings WHERE slug = %s RETURNING slug", (slug,))
+            row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Slug mapping not found")
+    invalidate_slug_cache()
+    return {"success": True, "slug": slug}
 
 @api_router.get("/fix-may-dates")
 async def fix_may_dates(token: str = None):
@@ -1586,12 +1700,30 @@ async def startup_event():
                     UNIQUE(latest_date, previous_date)
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS slug_mappings (
+                    slug TEXT PRIMARY KEY,
+                    brand_name TEXT NOT NULL,
+                    auto_registered BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_baseline_brand ON baseline(brand_name)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_scrapes_date ON scrapes(scrape_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_scrapes_brand ON scrapes(brand_name)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_scrapes_date_brand ON scrapes(scrape_date, brand_name)")
             conn.commit()
             logger.info("Database schema initialized")
+
+            cur.execute("SELECT COUNT(*) FROM slug_mappings")
+            if cur.fetchone()[0] == 0 and _SEED_SLUG_TO_BRAND:
+                for slug, brand_name in _SEED_SLUG_TO_BRAND.items():
+                    cur.execute(
+                        "INSERT INTO slug_mappings (slug, brand_name, auto_registered) VALUES (%s, %s, FALSE) ON CONFLICT DO NOTHING",
+                        (slug, brand_name)
+                    )
+                conn.commit()
+                logger.info(f"Seeded {len(_SEED_SLUG_TO_BRAND)} slug mappings from hardcoded dict")
 
             cur.execute("SELECT COUNT(*) FROM baseline")
             baseline_count = cur.fetchone()[0]

@@ -39,6 +39,7 @@ frontend/          # React frontend (CRA + CRACO)
 - **ai_insight_cache**: Caches AI insights for Combo & Menu Gap features (cache_key, insight_type, insight_data JSONB, created_at)
 - **competitor_item_matches**: Caches AI-matched item pairs between own brands and competitors (own_brand, own_item_name, competitor_brand, matched_item_name, match_confidence, data_hash)
 - **competitor_price_analysis**: Caches AI pricing analysis results keyed by data hash (data_hash, analysis_text, created_at)
+- **slug_mappings**: Maps Talabat URL slugs to brand names (slug TEXT PK, brand_name, auto_registered BOOLEAN, created_at). Seeded from hardcoded dict on first run. Unknown slugs are auto-registered when the Apify webhook receives them.
 
 ## Development
 - Frontend runs on port 5000 (webview workflow)
