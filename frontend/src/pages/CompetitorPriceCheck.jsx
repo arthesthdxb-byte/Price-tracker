@@ -107,6 +107,7 @@ const ExpandedRowDetail = ({ item, matches, selectedBrand, onLoadAnalysis, analy
                       <PriceCellBadge diff={m.price_diff} pct={m.price_diff_pct} />
                       <span style={{ fontSize: 10, color: T.label }}>({Math.round(m.match_confidence * 100)}% match)</span>
                     </div>
+                    {m.description && <div style={{ color: T.label, fontSize: 11, lineHeight: 1.3, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{m.description}</div>}
                   </div>
                 </div>
               ))}
