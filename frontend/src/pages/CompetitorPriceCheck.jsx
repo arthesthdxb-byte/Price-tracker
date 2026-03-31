@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, RefreshCw, Sparkles, Search, ArrowUpRight, ArrowDownRight, Minus, DollarSign, ChevronDown, ChevronRight, Package, Zap, BarChart3 } from 'lucide-react';
+import { X, RefreshCw, Sparkles, Search, ArrowUpRight, ArrowDownRight, DollarSign, ChevronDown, ChevronRight, Package, Zap, BarChart3 } from 'lucide-react';
 import { toast } from 'sonner';
 import axios from 'axios';
 
