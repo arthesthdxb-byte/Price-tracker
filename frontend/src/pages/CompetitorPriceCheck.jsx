@@ -120,7 +120,7 @@ const ExpandedRowDetail = ({ item, matches, selectedBrand, onLoadAnalysis, analy
               <div style={{ fontSize: 13, fontWeight: 600, color: T.title, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Sparkles size={14} color={T.accent} /> AI Pricing Analysis
               </div>
-              <button onClick={() => onLoadAnalysis(item, matches, !analysis)} disabled={analysisLoading}
+              <button onClick={() => onLoadAnalysis(item, matches, !!analysis)} disabled={analysisLoading}
                 style={{ ...headerBtnStyle, fontSize: 11, padding: '4px 10px' }}>
                 <RefreshCw size={10} className={analysisLoading ? 'animate-spin' : ''} />
                 {analysisLoading ? 'Analyzing...' : analysis ? 'Refresh' : 'Generate'}

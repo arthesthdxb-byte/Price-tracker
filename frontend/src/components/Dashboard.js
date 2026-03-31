@@ -522,7 +522,7 @@ const Dashboard = () => {
       { key: 'npd', title: 'NPD Tracker', desc: 'Discover new product launches and removed items across all tracked brands over time.', icon: Package, color: '#42A5F5', accent: 'rgba(66,165,245,0.1)' },
       { key: 'combo-insights', title: 'Combo Insights', desc: 'Analyze combo meal strategies, price tiers, and identify pricing gaps vs competitors.', icon: Target, color: '#FFA726', accent: 'rgba(255,167,38,0.1)' },
       { key: 'menu-gaps', title: 'Menu Gap Analyzer', desc: 'Find missing categories, variety gaps, and promotional opportunities vs competitors.', icon: Layers, color: '#E57373', accent: 'rgba(229,115,115,0.1)' },
-      { key: 'competitor-price', title: 'Competitor Price Check', desc: 'Compare individual menu items against competitor pricing with AI-powered strategic analysis.', icon: DollarSign, color: '#AB47BC', accent: 'rgba(171,71,188,0.1)' },
+      { key: 'competitor-price', title: 'Competitor Price Check', desc: 'Executive pricing matrix — compare your full menu against competitors with AI-powered matching and analysis.', icon: DollarSign, color: '#AB47BC', accent: 'rgba(171,71,188,0.1)' },
     ];
     return (
       <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg, #F5FAF8 0%, #FFFFFF 40%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
