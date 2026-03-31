@@ -1426,7 +1426,7 @@ async def apify_pull(dataset_id: str = None, token: str = None, run_id: str = No
                     brands[brand_name] = items
 
         if not brands:
-            return {"success": False, "error": "No valid brands parsed", "skipped_empty": skipped_empty}
+            return {"success": False, "error": "No valid brands parsed", "auto_registered": auto_registered, "skipped_empty": skipped_empty}
 
         scrape_payload = ScrapeUpload(scrape_date=scrape_date, brands=brands, set_as_baseline=False)
         result = await upload_scrape(scrape_payload)
@@ -1507,7 +1507,7 @@ async def apify_webhook(request: Request):
                     brands[brand_name] = items
 
         if not brands:
-            return {"success": False, "error": "No valid brands parsed", "skipped_empty": skipped_empty}
+            return {"success": False, "error": "No valid brands parsed", "auto_registered": auto_registered, "skipped_empty": skipped_empty}
 
         logger.info(f"[Apify] Parsed {len(brands)} brands, {sum(len(v) for v in brands.values())} total items")
 
