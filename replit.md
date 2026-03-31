@@ -52,7 +52,7 @@ frontend/          # React frontend (CRA + CRACO)
 - Historical price trend analysis
 - AI-generated summaries (requires ANTHROPIC_API_KEY)
 - Excel export of comparison results
-- Competitor Price Check: per-item competitor price comparison with AI-powered fuzzy name matching and strategic pricing analysis, with caching
+- Competitor Price Check: executive matrix view showing full menu vs competitors in a category-grouped table with color-coded price cells, bulk AI matching, expandable row details with per-item AI analysis, and summary statistics bar. Uses bulk-match endpoint with batched Claude calls, retry logic, rate-limit handling, and no-match sentinel caching
 - NPD (New Product Development) Tracker: identifies newly launched and removed menu items between consecutive scrape dates, with AI-powered summaries
 - Combo Insights: analyzes combo/meal/deal items across brands with price tier breakdowns, gap identification, and AI recommendations
 - Menu Gap Analyzer: identifies missing categories, price range gaps, and variety gaps between own brands and competitors with AI recommendations

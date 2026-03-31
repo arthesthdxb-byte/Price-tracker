@@ -5,6 +5,7 @@ import os
 import json
 import logging
 import hashlib
+import asyncio
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from contextlib import contextmanager
@@ -146,14 +147,45 @@ def save_matches(own_brand: str, own_item: str, matches: list, data_hash: str):
                 "DELETE FROM competitor_item_matches WHERE own_brand = %s AND own_item_name = %s",
                 (own_brand, own_item)
             )
-            for m in matches:
+            if matches:
+                for m in matches:
+                    cur.execute(
+                        "INSERT INTO competitor_item_matches (own_brand, own_item_name, competitor_brand, matched_item_name, match_confidence, data_hash) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                        (own_brand, own_item, m["competitor_brand"], m["matched_item_name"], m.get("match_confidence", 0), data_hash)
+                    )
+            else:
                 cur.execute(
                     "INSERT INTO competitor_item_matches (own_brand, own_item_name, competitor_brand, matched_item_name, match_confidence, data_hash) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
-                    (own_brand, own_item, m["competitor_brand"], m["matched_item_name"], m.get("match_confidence", 0), data_hash)
+                    (own_brand, own_item, "__NO_MATCH__", "__NO_MATCH__", 0.0, data_hash)
                 )
             cur.close()
     except Exception as e:
         logger.error(f"Error saving matches: {e}")
+
+
+def save_matches_bulk(own_brand: str, batch_items: list, batch_results: dict, data_hashes: dict):
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            for it in batch_items:
+                name = it["name"]
+                matches = batch_results.get(name, [])
+                dh = data_hashes.get(name, "")
+                cur.execute("DELETE FROM competitor_item_matches WHERE own_brand = %s AND own_item_name = %s", (own_brand, name))
+                if matches:
+                    for m in matches:
+                        cur.execute(
+                            "INSERT INTO competitor_item_matches (own_brand, own_item_name, competitor_brand, matched_item_name, match_confidence, data_hash) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                            (own_brand, name, m["competitor_brand"], m["matched_item_name"], m.get("match_confidence", 0), dh)
+                        )
+                else:
+                    cur.execute(
+                        "INSERT INTO competitor_item_matches (own_brand, own_item_name, competitor_brand, matched_item_name, match_confidence, data_hash) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                        (own_brand, name, "__NO_MATCH__", "__NO_MATCH__", 0.0, dh)
+                    )
+            cur.close()
+    except Exception as e:
+        logger.error(f"Error saving bulk matches: {e}")
 
 
 def get_cached_analysis(data_hash: str) -> Optional[str]:
@@ -181,7 +213,7 @@ def save_analysis(data_hash: str, analysis_text: str):
         logger.error(f"Error saving analysis: {e}")
 
 
-async def call_claude(prompt: str, max_tokens: int = 800) -> Optional[str]:
+async def call_claude(prompt: str, max_tokens: int = 800, retries: int = 3) -> Optional[str]:
     try:
         import httpx
         api_key = os.environ.get('ANTHROPIC_API_KEY')
@@ -190,25 +222,32 @@ async def call_claude(prompt: str, max_tokens: int = 800) -> Optional[str]:
             return None
 
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json"
-                },
-                json={
-                    "model": "claude-sonnet-4-20250514",
-                    "max_tokens": max_tokens,
-                    "messages": [{"role": "user", "content": prompt}]
-                },
-                timeout=45.0
-            )
-            if response.status_code == 200:
-                return response.json()["content"][0]["text"]
-            else:
-                logger.error(f"Claude API error: {response.status_code}")
-                return None
+            for attempt in range(retries):
+                response = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json"
+                    },
+                    json={
+                        "model": "claude-sonnet-4-20250514",
+                        "max_tokens": max_tokens,
+                        "messages": [{"role": "user", "content": prompt}]
+                    },
+                    timeout=60.0
+                )
+                if response.status_code == 200:
+                    return response.json()["content"][0]["text"]
+                elif response.status_code == 429:
+                    wait = (attempt + 1) * 3
+                    logger.warning(f"Claude rate limited, retrying in {wait}s (attempt {attempt+1}/{retries})")
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error(f"Claude API error: {response.status_code}")
+                    return None
+            logger.error("Claude API: exhausted retries after rate limiting")
+            return None
     except Exception as e:
         logger.error(f"Claude API call failed: {e}")
         return None
@@ -497,4 +536,176 @@ Keep it actionable and specific to the UAE food delivery market. Use AED currenc
         raise
     except Exception as e:
         logger.error(f"Error analyzing pricing: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@competitor_router.get("/bulk-match/{own_brand}")
+async def bulk_match_brand(own_brand: str):
+    try:
+        latest_date = get_latest_scrape_date()
+        if not latest_date:
+            return {"items": [], "competitors": [], "matches": {}, "scrape_date": None}
+
+        own_items = get_brand_items(own_brand, latest_date)
+        if not own_items:
+            return {"items": [], "competitors": [], "matches": {}, "scrape_date": latest_date}
+
+        competitors = get_competitors_for_brand(own_brand)
+        competitor_items_map = {}
+        for comp in competitors:
+            comp_items = get_brand_items(comp, latest_date)
+            if comp_items:
+                competitor_items_map[comp] = comp_items
+
+        item_list = []
+        all_matches = {}
+        items_needing_match = []
+
+        for name in sorted(own_items.keys()):
+            detail = get_item_detail(own_items[name])
+            item_list.append({"item_name": name, **detail})
+
+            if not competitor_items_map:
+                all_matches[name] = []
+                continue
+
+            hash_input = {
+                "own_brand": own_brand,
+                "own_item": name,
+                "own_price": detail["price"],
+                "own_description": detail.get("description", ""),
+                "own_category": detail.get("category", ""),
+                "competitors": {
+                    comp: {n: get_item_price(d) for n, d in items.items()}
+                    for comp, items in competitor_items_map.items()
+                }
+            }
+            data_hash = compute_data_hash(hash_input)
+
+            cached = get_cached_matches(own_brand, name, data_hash)
+            if cached:
+                matches = []
+                for c in cached:
+                    if c.get("match_confidence", 0) < 0.5:
+                        continue
+                    comp_items = competitor_items_map.get(c["competitor_brand"], {})
+                    matched_data = comp_items.get(c["matched_item_name"])
+                    if matched_data:
+                        md = get_item_detail(matched_data)
+                        price_diff = md["price"] - detail["price"]
+                        price_diff_pct = (price_diff / detail["price"] * 100) if detail["price"] > 0 else 0
+                        matches.append({
+                            "competitor_brand": c["competitor_brand"],
+                            "item_name": c["matched_item_name"],
+                            "match_confidence": c["match_confidence"],
+                            "price_diff": round(price_diff, 2),
+                            "price_diff_pct": round(price_diff_pct, 1),
+                            **md
+                        })
+                all_matches[name] = matches
+            else:
+                items_needing_match.append({"name": name, "detail": detail, "data_hash": data_hash})
+
+        if items_needing_match and competitor_items_map:
+            comp_items_summary = {}
+            for comp, items in competitor_items_map.items():
+                comp_items_summary[comp] = [
+                    {"name": n, "price": get_item_price(d)} for n, d in items.items()
+                ]
+
+            BATCH_SIZE = 15
+            for i in range(0, len(items_needing_match), BATCH_SIZE):
+                if i > 0:
+                    await asyncio.sleep(2)
+                batch = items_needing_match[i:i + BATCH_SIZE]
+                items_block = "\n".join(
+                    f'{idx+1}. "{it["name"]}" | AED {it["detail"]["price"]} | Category: "{it["detail"].get("category", "")}" | Desc: "{it["detail"].get("description", "")[:80]}"'
+                    for idx, it in enumerate(batch)
+                )
+
+                prompt = f"""You are a menu item matching expert for food/restaurant brands in the UAE.
+
+Match each item from "{own_brand}" to the BEST equivalent item from each competitor brand below. Items should be essentially the same dish/product.
+
+Own brand items:
+{items_block}
+
+Competitor menus:
+{json.dumps(comp_items_summary, indent=2)}
+
+Return a JSON object where keys are the own item names (exactly as given) and values are arrays of matches:
+{{
+  "Item Name": [{{"competitor_brand": "BrandName", "matched_item_name": "exact name from their menu", "match_confidence": 0.0-1.0}}],
+  ...
+}}
+
+Rules:
+- Only match truly similar items (confidence >= 0.5)
+- Use EXACT item names from competitor menus
+- Skip items with no good match (empty array)
+- Return ONLY the JSON object, nothing else"""
+
+                ai_response = await call_claude(prompt, max_tokens=min(3000, 200 * len(batch)))
+                if ai_response:
+                    try:
+                        cleaned = ai_response.strip()
+                        if cleaned.startswith("```"):
+                            cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned
+                            cleaned = cleaned.rsplit("```", 1)[0]
+                        batch_results = json.loads(cleaned)
+
+                        normalized_results = {}
+                        for it in batch:
+                            name = it["name"]
+                            raw_matches = batch_results.get(name, [])
+                            if not isinstance(raw_matches, list):
+                                raw_matches = []
+                            normalized_results[name] = raw_matches
+
+                        data_hashes = {it["name"]: it["data_hash"] for it in batch}
+                        save_matches_bulk(own_brand, batch, normalized_results, data_hashes)
+
+                        for it in batch:
+                            name = it["name"]
+                            raw_matches = normalized_results.get(name, [])
+                            matches = []
+                            for m in raw_matches:
+                                comp = m.get("competitor_brand", "")
+                                matched_name = m.get("matched_item_name", "")
+                                comp_items = competitor_items_map.get(comp, {})
+                                matched_data = comp_items.get(matched_name)
+                                if matched_data and m.get("match_confidence", 0) >= 0.5:
+                                    md = get_item_detail(matched_data)
+                                    price_diff = md["price"] - it["detail"]["price"]
+                                    price_diff_pct = (price_diff / it["detail"]["price"] * 100) if it["detail"]["price"] > 0 else 0
+                                    matches.append({
+                                        "competitor_brand": comp,
+                                        "item_name": matched_name,
+                                        "match_confidence": m.get("match_confidence", 0),
+                                        "price_diff": round(price_diff, 2),
+                                        "price_diff_pct": round(price_diff_pct, 1),
+                                        **md
+                                    })
+                            all_matches[name] = matches
+                    except json.JSONDecodeError:
+                        logger.error(f"Failed to parse bulk match response")
+                        for it in batch:
+                            all_matches.setdefault(it["name"], [])
+                else:
+                    for it in batch:
+                        all_matches.setdefault(it["name"], [])
+
+        return {
+            "items": item_list,
+            "competitors": list(competitor_items_map.keys()),
+            "matches": all_matches,
+            "scrape_date": latest_date,
+            "total_items": len(item_list),
+            "matched_items": sum(1 for m in all_matches.values() if m),
+            "cached_note": f"{len(item_list) - len(items_needing_match)} cached, {len(items_needing_match)} fresh"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in bulk match: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
