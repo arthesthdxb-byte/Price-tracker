@@ -152,8 +152,19 @@ export const CompetitorPriceCheckView = ({ onBack, country = 'UAE' }) => {
   const [expandedItem, setExpandedItem] = useState(null);
   const [analyses, setAnalyses] = useState({});
   const [analysisLoadingItem, setAnalysisLoadingItem] = useState(null);
+  const [availableDates, setAvailableDates] = useState([]);
+  const [selectedDate, setSelectedDate] = useState('');
 
-  useEffect(() => { loadBrands(); }, [country]);
+  useEffect(() => { loadBrands(); loadDates(); }, [country]);
+
+  const loadDates = async () => {
+    try {
+      const res = await axios.get(`${API}/available-dates?country=${country}`);
+      const dates = res.data.dates || [];
+      setAvailableDates(dates);
+      if (dates.length > 0) setSelectedDate(dates[0]);
+    } catch (err) { console.error('Error loading dates:', err); }
+  };
 
   const loadBrands = async () => {
     try {
@@ -162,18 +173,22 @@ export const CompetitorPriceCheckView = ({ onBack, country = 'UAE' }) => {
       if (res.data.brands?.length > 0) {
         const first = res.data.brands[0].own_brand;
         setSelectedBrand(first);
-        loadMatrix(first);
       }
     } catch (err) { toast.error('Error loading brands'); }
   };
 
-  const loadMatrix = async (brand) => {
+  useEffect(() => {
+    if (selectedBrand && selectedDate) loadMatrix(selectedBrand, selectedDate);
+  }, [selectedBrand, selectedDate]);
+
+  const loadMatrix = async (brand, date) => {
     setLoading(true);
     setMatrixData(null);
     setExpandedItem(null);
     setAnalyses({});
     try {
-      const res = await axios.get(`${API}/bulk-match/${encodeURIComponent(brand)}?country=${country}`);
+      const dateParam = date ? `&scrape_date=${encodeURIComponent(date)}` : '';
+      const res = await axios.get(`${API}/bulk-match/${encodeURIComponent(brand)}?country=${country}${dateParam}`);
       setMatrixData(res.data);
     } catch (err) { toast.error('Error loading competitor data'); }
     setLoading(false);
@@ -182,7 +197,10 @@ export const CompetitorPriceCheckView = ({ onBack, country = 'UAE' }) => {
   const handleBrandChange = (brand) => {
     setSelectedBrand(brand);
     setSearchQuery('');
-    loadMatrix(brand);
+  };
+
+  const handleDateChange = (date) => {
+    setSelectedDate(date);
   };
 
   const loadAnalysis = async (item, matches, force = false) => {
@@ -263,12 +281,16 @@ export const CompetitorPriceCheckView = ({ onBack, country = 'UAE' }) => {
                 Executive pricing matrix — compare your full menu against competitors
               </p>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 12, color: T.label, fontWeight: 500 }}>Brand:</span>
               <select value={selectedBrand} onChange={(e) => handleBrandChange(e.target.value)} style={{ ...selectStyle, minWidth: 200 }}>
                 {brands.map(b => <option key={b.own_brand} value={b.own_brand}>{b.own_brand}</option>)}
               </select>
-              <button onClick={() => loadMatrix(selectedBrand)} disabled={loading} style={headerBtnAccent}>
+              <span style={{ fontSize: 12, color: T.label, fontWeight: 500 }}>Date:</span>
+              <select value={selectedDate} onChange={(e) => handleDateChange(e.target.value)} style={{ ...selectStyle, minWidth: 140 }}>
+                {availableDates.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+              <button onClick={() => loadMatrix(selectedBrand, selectedDate)} disabled={loading} style={headerBtnAccent}>
                 <Zap size={14} /> {loading ? 'Matching...' : 'Match All'}
               </button>
               <button onClick={onBack} style={headerBtnStyle}><X size={14} /> Back</button>

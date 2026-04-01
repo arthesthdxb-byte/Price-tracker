@@ -80,17 +80,22 @@ def _parse_date_for_sorting(date_str: str) -> datetime:
     return datetime.min
 
 
-def get_latest_scrape_date(country: str = "UAE") -> Optional[str]:
+def get_all_scrape_dates(country: str = "UAE") -> list:
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT DISTINCT scrape_date FROM scrapes WHERE country = %s", (country,))
         rows = cur.fetchall()
         cur.close()
         if not rows:
-            return None
+            return []
         dates = [r[0] for r in rows]
         dates.sort(key=_parse_date_for_sorting, reverse=True)
-        return dates[0]
+        return dates
+
+
+def get_latest_scrape_date(country: str = "UAE") -> Optional[str]:
+    dates = get_all_scrape_dates(country)
+    return dates[0] if dates else None
 
 
 def get_brand_items(brand_name: str, scrape_date: Optional[str] = None, country: str = "UAE") -> dict:
@@ -279,6 +284,15 @@ def get_item_detail(item_data) -> dict:
     return {"price": safe_float(item_data), "original_price": None, "description": "", "category": "", "image_url": ""}
 
 
+@competitor_router.get("/available-dates")
+async def get_available_dates(country: str = "UAE"):
+    try:
+        dates = get_all_scrape_dates(country)
+        return {"dates": dates}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @competitor_router.get("/brands")
 async def get_own_brands(country: str = "UAE"):
     try:
@@ -299,13 +313,13 @@ async def get_own_brands(country: str = "UAE"):
 
 
 @competitor_router.get("/items/{own_brand}")
-async def get_own_brand_items(own_brand: str, country: str = "UAE"):
+async def get_own_brand_items(own_brand: str, country: str = "UAE", scrape_date: str = None):
     try:
-        latest_date = get_latest_scrape_date(country)
-        if not latest_date:
+        target_date = scrape_date or get_latest_scrape_date(country)
+        if not target_date:
             return {"items": [], "scrape_date": None}
 
-        items = get_brand_items(own_brand, latest_date, country)
+        items = get_brand_items(own_brand, target_date, country)
         item_list = []
         for name, data in sorted(items.items()):
             detail = get_item_detail(data)
@@ -313,15 +327,15 @@ async def get_own_brand_items(own_brand: str, country: str = "UAE"):
                 "item_name": name,
                 **detail
             })
-        return {"items": item_list, "scrape_date": latest_date}
+        return {"items": item_list, "scrape_date": target_date}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @competitor_router.get("/match/{own_brand}/{item_name:path}")
-async def match_competitor_items(own_brand: str, item_name: str, country: str = "UAE"):
+async def match_competitor_items(own_brand: str, item_name: str, country: str = "UAE", scrape_date: str = None):
     try:
-        latest_date = get_latest_scrape_date(country)
+        latest_date = scrape_date or get_latest_scrape_date(country)
         if not latest_date:
             raise HTTPException(status_code=404, detail="No scrape data available")
 
@@ -548,20 +562,20 @@ Keep it actionable and specific to the UAE food delivery market. Use AED currenc
 
 
 @competitor_router.get("/bulk-match/{own_brand}")
-async def bulk_match_brand(own_brand: str, country: str = "UAE"):
+async def bulk_match_brand(own_brand: str, country: str = "UAE", scrape_date: str = None):
     try:
-        latest_date = get_latest_scrape_date(country)
-        if not latest_date:
+        target_date = scrape_date or get_latest_scrape_date(country)
+        if not target_date:
             return {"items": [], "competitors": [], "matches": {}, "scrape_date": None}
 
-        own_items = get_brand_items(own_brand, latest_date, country)
+        own_items = get_brand_items(own_brand, target_date, country)
         if not own_items:
-            return {"items": [], "competitors": [], "matches": {}, "scrape_date": latest_date}
+            return {"items": [], "competitors": [], "matches": {}, "scrape_date": target_date}
 
         competitors = get_competitors_for_brand(own_brand, country)
         competitor_items_map = {}
         for comp in competitors:
-            comp_items = get_brand_items(comp, latest_date, country)
+            comp_items = get_brand_items(comp, target_date, country)
             if comp_items:
                 competitor_items_map[comp] = comp_items
 
@@ -713,7 +727,7 @@ CRITICAL MATCHING RULES:
             "items": item_list,
             "competitors": list(competitor_items_map.keys()),
             "matches": all_matches,
-            "scrape_date": latest_date,
+            "scrape_date": target_date,
             "total_items": len(item_list),
             "matched_items": sum(1 for m in all_matches.values() if m),
             "cached_note": f"{len(item_list) - len(items_needing_match)} cached, {len(items_needing_match)} fresh"
