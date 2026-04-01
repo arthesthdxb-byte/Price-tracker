@@ -1,7 +1,7 @@
 # Menu Price Tracker
 
 ## Overview
-A full-stack web application for tracking and comparing food menu prices across different restaurant brands over time. Built for Talabat UAE competitive pricing intelligence.
+A full-stack web application for tracking and comparing food menu prices across different restaurant brands over time. Built for Talabat competitive pricing intelligence across multiple countries (UAE, Kuwait, Bahrain, Qatar).
 
 ## Architecture
 - **Frontend**: React 19 with Tailwind CSS, Radix UI (Shadcn pattern), CRACO build system
@@ -32,10 +32,10 @@ frontend/          # React frontend (CRA + CRACO)
 ```
 
 ## Database Schema (PostgreSQL)
-- **baseline**: Stores baseline price data per brand (brand_name, items JSONB, baseline_date)
-- **scrapes**: Stores daily scrape data with comparisons (scrape_date, brand_name, items JSONB, vs_baseline JSONB, vs_previous JSONB, ai_summary)
-- **brand_groups**: Stores brand groupings (own_brand, competitors TEXT[], group_order)
-- **npd_summaries**: Caches AI-generated NPD summaries by date pair (latest_date, previous_date, summary, created_at)
+- **baseline**: Stores baseline price data per brand (brand_name, items JSONB, baseline_date, country TEXT DEFAULT 'UAE')
+- **scrapes**: Stores daily scrape data with comparisons (scrape_date, brand_name, items JSONB, vs_baseline JSONB, vs_previous JSONB, ai_summary, country TEXT DEFAULT 'UAE')
+- **brand_groups**: Stores brand groupings (own_brand, competitors TEXT[], group_order, country TEXT DEFAULT 'UAE')
+- **npd_summaries**: Caches AI-generated NPD summaries by date pair (latest_date, previous_date, summary, created_at, country TEXT DEFAULT 'UAE')
 - **ai_insight_cache**: Caches AI insights for Combo & Menu Gap features (cache_key, insight_type, insight_data JSONB, created_at)
 - **competitor_item_matches**: Caches AI-matched item pairs between own brands and competitors (own_brand, own_item_name, competitor_brand, matched_item_name, match_confidence, data_hash)
 - **competitor_price_analysis**: Caches AI pricing analysis results keyed by data hash (data_hash, analysis_text, created_at)
@@ -58,7 +58,8 @@ frontend/          # React frontend (CRA + CRACO)
 - Combo Insights: analyzes combo/meal/deal items across brands with price tier breakdowns, gap identification, and AI recommendations
 - Menu Gap Analyzer: identifies missing categories, price range gaps, and variety gaps between own brands and competitors with AI recommendations
 - Enriched item format support: items can be float OR dict with price, original_price, description, category, image_url (use get_price()/get_item_detail() helpers)
-- Apify webhook integration for automated scrape data ingestion
+- Multi-country support (UAE, Kuwait, Bahrain, Qatar) with country selector on home page and country-filtered data across all endpoints
+- Apify webhook integration for automated scrape data ingestion with auto-detection of country from Talabat URLs
 
 ## Environment Variables
 - `DATABASE_URL`: PostgreSQL connection string (auto-set by Replit)

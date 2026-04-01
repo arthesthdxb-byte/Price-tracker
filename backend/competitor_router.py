@@ -80,10 +80,10 @@ def _parse_date_for_sorting(date_str: str) -> datetime:
     return datetime.min
 
 
-def get_latest_scrape_date() -> Optional[str]:
+def get_latest_scrape_date(country: str = "UAE") -> Optional[str]:
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT DISTINCT scrape_date FROM scrapes")
+        cur.execute("SELECT DISTINCT scrape_date FROM scrapes WHERE country = %s", (country,))
         rows = cur.fetchall()
         cur.close()
         if not rows:
@@ -93,18 +93,18 @@ def get_latest_scrape_date() -> Optional[str]:
         return dates[0]
 
 
-def get_brand_items(brand_name: str, scrape_date: Optional[str] = None) -> dict:
+def get_brand_items(brand_name: str, scrape_date: Optional[str] = None, country: str = "UAE") -> dict:
     with get_db() as conn:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         if scrape_date:
             cur.execute(
-                "SELECT items FROM scrapes WHERE brand_name = %s AND scrape_date = %s ORDER BY uploaded_at DESC LIMIT 1",
-                (brand_name, scrape_date)
+                "SELECT items FROM scrapes WHERE brand_name = %s AND scrape_date = %s AND country = %s ORDER BY uploaded_at DESC LIMIT 1",
+                (brand_name, scrape_date, country)
             )
         else:
             cur.execute(
-                "SELECT items FROM scrapes WHERE brand_name = %s ORDER BY uploaded_at DESC LIMIT 1",
-                (brand_name,)
+                "SELECT items FROM scrapes WHERE brand_name = %s AND country = %s ORDER BY uploaded_at DESC LIMIT 1",
+                (brand_name, country)
             )
         row = cur.fetchone()
         cur.close()
@@ -113,10 +113,10 @@ def get_brand_items(brand_name: str, scrape_date: Optional[str] = None) -> dict:
         return {}
 
 
-def get_competitors_for_brand(own_brand: str) -> list:
+def get_competitors_for_brand(own_brand: str, country: str = "UAE") -> list:
     with get_db() as conn:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("SELECT competitors FROM brand_groups WHERE own_brand = %s", (own_brand,))
+        cur.execute("SELECT competitors FROM brand_groups WHERE own_brand = %s AND country = %s", (own_brand, country))
         row = cur.fetchone()
         cur.close()
         if row and row["competitors"]:
@@ -280,11 +280,11 @@ def get_item_detail(item_data) -> dict:
 
 
 @competitor_router.get("/brands")
-async def get_own_brands():
+async def get_own_brands(country: str = "UAE"):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT own_brand, competitors FROM brand_groups ORDER BY group_order")
+            cur.execute("SELECT own_brand, competitors FROM brand_groups WHERE country = %s ORDER BY group_order", (country,))
             rows = cur.fetchall()
             cur.close()
         brands = []
@@ -299,13 +299,13 @@ async def get_own_brands():
 
 
 @competitor_router.get("/items/{own_brand}")
-async def get_own_brand_items(own_brand: str):
+async def get_own_brand_items(own_brand: str, country: str = "UAE"):
     try:
-        latest_date = get_latest_scrape_date()
+        latest_date = get_latest_scrape_date(country)
         if not latest_date:
             return {"items": [], "scrape_date": None}
 
-        items = get_brand_items(own_brand, latest_date)
+        items = get_brand_items(own_brand, latest_date, country)
         item_list = []
         for name, data in sorted(items.items()):
             detail = get_item_detail(data)
@@ -319,18 +319,18 @@ async def get_own_brand_items(own_brand: str):
 
 
 @competitor_router.get("/match/{own_brand}/{item_name:path}")
-async def match_competitor_items(own_brand: str, item_name: str):
+async def match_competitor_items(own_brand: str, item_name: str, country: str = "UAE"):
     try:
-        latest_date = get_latest_scrape_date()
+        latest_date = get_latest_scrape_date(country)
         if not latest_date:
             raise HTTPException(status_code=404, detail="No scrape data available")
 
-        own_items = get_brand_items(own_brand, latest_date)
+        own_items = get_brand_items(own_brand, latest_date, country)
         if item_name not in own_items:
             raise HTTPException(status_code=404, detail=f"Item '{item_name}' not found for {own_brand}")
 
         own_detail = get_item_detail(own_items[item_name])
-        competitors = get_competitors_for_brand(own_brand)
+        competitors = get_competitors_for_brand(own_brand, country)
         if not competitors:
             return {
                 "own_item": {"item_name": item_name, **own_detail},
@@ -341,7 +341,7 @@ async def match_competitor_items(own_brand: str, item_name: str):
 
         competitor_items_map = {}
         for comp in competitors:
-            comp_items = get_brand_items(comp, latest_date)
+            comp_items = get_brand_items(comp, latest_date, country)
             if comp_items:
                 competitor_items_map[comp] = comp_items
 
@@ -548,20 +548,20 @@ Keep it actionable and specific to the UAE food delivery market. Use AED currenc
 
 
 @competitor_router.get("/bulk-match/{own_brand}")
-async def bulk_match_brand(own_brand: str):
+async def bulk_match_brand(own_brand: str, country: str = "UAE"):
     try:
-        latest_date = get_latest_scrape_date()
+        latest_date = get_latest_scrape_date(country)
         if not latest_date:
             return {"items": [], "competitors": [], "matches": {}, "scrape_date": None}
 
-        own_items = get_brand_items(own_brand, latest_date)
+        own_items = get_brand_items(own_brand, latest_date, country)
         if not own_items:
             return {"items": [], "competitors": [], "matches": {}, "scrape_date": latest_date}
 
-        competitors = get_competitors_for_brand(own_brand)
+        competitors = get_competitors_for_brand(own_brand, country)
         competitor_items_map = {}
         for comp in competitors:
-            comp_items = get_brand_items(comp, latest_date)
+            comp_items = get_brand_items(comp, latest_date, country)
             if comp_items:
                 competitor_items_map[comp] = comp_items
 

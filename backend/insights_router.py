@@ -464,21 +464,21 @@ def _find_price_gaps(own_tiers: dict, comp_tiers_list: list) -> list:
 
 
 @insights_router.get("/combos")
-async def combo_insights(scrape_date: str = None):
+async def combo_insights(scrape_date: str = None, country: str = "UAE"):
     """Full combo analysis with price tiers, gaps, and AI recommendations per group."""
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT DISTINCT scrape_date FROM scrapes")
+            cur.execute("SELECT DISTINCT scrape_date FROM scrapes WHERE country = %s", (country,))
             all_dates = sorted([r["scrape_date"] for r in cur.fetchall()], key=parse_date_for_sorting)
             target = scrape_date if scrape_date and scrape_date in all_dates else (all_dates[-1] if all_dates else None)
             if not target:
                 return {"has_data": False, "groups": [], "available_dates": []}
 
-            cur.execute("SELECT brand_name, items FROM scrapes WHERE scrape_date = %s", (target,))
+            cur.execute("SELECT brand_name, items FROM scrapes WHERE scrape_date = %s AND country = %s", (target, country))
             scrape_data = {r["brand_name"]: r["items"] for r in cur.fetchall()}
 
-            cur.execute("SELECT own_brand, competitors, group_order FROM brand_groups ORDER BY group_order")
+            cur.execute("SELECT own_brand, competitors, group_order FROM brand_groups WHERE country = %s ORDER BY group_order", (country,))
             groups = cur.fetchall()
             cur.close()
 
@@ -631,19 +631,19 @@ def _parse_combo_json(ai_text: str) -> Optional[dict]:
 
 
 @insights_router.get("/combos/ai")
-async def combo_ai_insights(scrape_date: str = None, force: bool = False):
+async def combo_ai_insights(scrape_date: str = None, force: bool = False, country: str = "UAE"):
     """
     AI combo insights — per brand group, sends combo details + standalone menu
     so Claude can perform structure, value/discount, and gap analysis.
     Returns structured JSON analysis per brand group.
     """
     try:
-        combo_data = await combo_insights(scrape_date)
+        combo_data = await combo_insights(scrape_date, country)
         if not combo_data["has_data"]:
             return {"has_data": False, "insights": None}
 
         target = combo_data["scrape_date"]
-        cache_key = f"combo_ai_v4_{target}"
+        cache_key = f"combo_ai_v4_{target}_{country}"
 
         if not force:
             cached = get_cached_insight(cache_key)
@@ -907,7 +907,7 @@ def _parse_brand_insights(ai_text: str, brand_names: list) -> list:
 # ──────────────────────────────────────────────────────────
 
 @insights_router.get("/menu-gaps")
-async def menu_gap_analysis(scrape_date: str = None):
+async def menu_gap_analysis(scrape_date: str = None, country: str = "UAE"):
     """
     Per brand group: identify category gaps, price tier gaps, and item-type gaps
     between own brand and competitors.
@@ -915,16 +915,16 @@ async def menu_gap_analysis(scrape_date: str = None):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT DISTINCT scrape_date FROM scrapes")
+            cur.execute("SELECT DISTINCT scrape_date FROM scrapes WHERE country = %s", (country,))
             all_dates = sorted([r["scrape_date"] for r in cur.fetchall()], key=parse_date_for_sorting)
             target = scrape_date if scrape_date and scrape_date in all_dates else (all_dates[-1] if all_dates else None)
             if not target:
                 return {"has_data": False, "groups": [], "available_dates": []}
 
-            cur.execute("SELECT brand_name, items FROM scrapes WHERE scrape_date = %s", (target,))
+            cur.execute("SELECT brand_name, items FROM scrapes WHERE scrape_date = %s AND country = %s", (target, country))
             scrape_data = {r["brand_name"]: r["items"] for r in cur.fetchall()}
 
-            cur.execute("SELECT own_brand, competitors, group_order FROM brand_groups ORDER BY group_order")
+            cur.execute("SELECT own_brand, competitors, group_order FROM brand_groups WHERE country = %s ORDER BY group_order", (country,))
             groups = cur.fetchall()
             cur.close()
 
@@ -1084,19 +1084,19 @@ async def menu_gap_analysis(scrape_date: str = None):
 
 
 @insights_router.get("/menu-gaps/ai")
-async def menu_gap_ai_insights(scrape_date: str = None, force: bool = False):
+async def menu_gap_ai_insights(scrape_date: str = None, force: bool = False, country: str = "UAE"):
     """
     AI menu gap analysis — brand-by-brand, sends actual category items + descriptions
     so Claude can identify protein gaps, offering types missing, specific menu holes.
     Returns array of per-brand insights.
     """
     try:
-        gap_data = await menu_gap_analysis(scrape_date)
+        gap_data = await menu_gap_analysis(scrape_date, country)
         if not gap_data["has_data"]:
             return {"has_data": False, "insights": None}
 
         target = gap_data["scrape_date"]
-        cache_key = f"menugap_ai_v3_{target}"
+        cache_key = f"menugap_ai_v3_{target}_{country}"
 
         if not force:
             cached = get_cached_insight(cache_key)

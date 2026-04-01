@@ -289,7 +289,7 @@ const BrandInsightsCard = ({ title, brandInsights, loading, onRegenerate }) => (
 // COMBO INSIGHTS VIEW
 // ================================================================
 
-export const ComboInsightsView = ({ onBack }) => {
+export const ComboInsightsView = ({ onBack, country = 'UAE' }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [aiInsights, setAiInsights] = useState(null);
@@ -301,7 +301,7 @@ export const ComboInsightsView = ({ onBack }) => {
   const loadData = async (date) => {
     setLoading(true);
     try {
-      const url = date ? `${API}/combos?scrape_date=${date}` : `${API}/combos`;
+      const url = date ? `${API}/combos?scrape_date=${date}&country=${country}` : `${API}/combos?country=${country}`;
       const res = await axios.get(url);
       setData(res.data);
       if (res.data.has_data) loadAi(res.data.scrape_date);
@@ -312,13 +312,13 @@ export const ComboInsightsView = ({ onBack }) => {
   const loadAi = async (date, force = false) => {
     setAiLoading(true);
     try {
-      const res = await axios.get(`${API}/combos/ai?scrape_date=${date}${force ? '&force=true' : ''}`);
+      const res = await axios.get(`${API}/combos/ai?scrape_date=${date}&country=${country}${force ? '&force=true' : ''}`);
       setAiInsights(res.data.insights?.brand_insights || null);
     } catch (err) { console.error('AI insights error:', err); }
     setAiLoading(false);
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [country]);
 
   if (loading) return <div style={{ textAlign: 'center', padding: 60, color: T.label }}>Loading combo insights...</div>;
   if (!data?.has_data) return (
@@ -578,7 +578,7 @@ export const ComboInsightsView = ({ onBack }) => {
 // MENU GAP ANALYZER VIEW
 // ================================================================
 
-export const MenuGapAnalyzerView = ({ onBack }) => {
+export const MenuGapAnalyzerView = ({ onBack, country = 'UAE' }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [aiInsights, setAiInsights] = useState(null);
@@ -589,7 +589,7 @@ export const MenuGapAnalyzerView = ({ onBack }) => {
   const loadData = async (date) => {
     setLoading(true);
     try {
-      const url = date ? `${API}/menu-gaps?scrape_date=${date}` : `${API}/menu-gaps`;
+      const url = date ? `${API}/menu-gaps?scrape_date=${date}&country=${country}` : `${API}/menu-gaps?country=${country}`;
       const res = await axios.get(url);
       setData(res.data);
       if (res.data.has_data) loadAi(res.data.scrape_date);
@@ -600,13 +600,13 @@ export const MenuGapAnalyzerView = ({ onBack }) => {
   const loadAi = async (date, force = false) => {
     setAiLoading(true);
     try {
-      const res = await axios.get(`${API}/menu-gaps/ai?scrape_date=${date}${force ? '&force=true' : ''}`);
+      const res = await axios.get(`${API}/menu-gaps/ai?scrape_date=${date}&country=${country}${force ? '&force=true' : ''}`);
       setAiInsights(res.data.insights?.brand_insights || null);
     } catch (err) { console.error('AI insights error:', err); }
     setAiLoading(false);
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [country]);
 
   if (loading) return <div style={{ textAlign: 'center', padding: 60, color: T.label }}>Loading menu gap analysis...</div>;
   if (!data?.has_data) return (

@@ -143,7 +143,7 @@ const ExpandedRowDetail = ({ item, matches, selectedBrand, onLoadAnalysis, analy
   </tr>
 );
 
-export const CompetitorPriceCheckView = ({ onBack }) => {
+export const CompetitorPriceCheckView = ({ onBack, country = 'UAE' }) => {
   const [brands, setBrands] = useState([]);
   const [selectedBrand, setSelectedBrand] = useState('');
   const [matrixData, setMatrixData] = useState(null);
@@ -153,11 +153,11 @@ export const CompetitorPriceCheckView = ({ onBack }) => {
   const [analyses, setAnalyses] = useState({});
   const [analysisLoadingItem, setAnalysisLoadingItem] = useState(null);
 
-  useEffect(() => { loadBrands(); }, []);
+  useEffect(() => { loadBrands(); }, [country]);
 
   const loadBrands = async () => {
     try {
-      const res = await axios.get(`${API}/brands`);
+      const res = await axios.get(`${API}/brands?country=${country}`);
       setBrands(res.data.brands || []);
       if (res.data.brands?.length > 0) {
         const first = res.data.brands[0].own_brand;
@@ -173,7 +173,7 @@ export const CompetitorPriceCheckView = ({ onBack }) => {
     setExpandedItem(null);
     setAnalyses({});
     try {
-      const res = await axios.get(`${API}/bulk-match/${encodeURIComponent(brand)}`);
+      const res = await axios.get(`${API}/bulk-match/${encodeURIComponent(brand)}?country=${country}`);
       setMatrixData(res.data);
     } catch (err) { toast.error('Error loading competitor data'); }
     setLoading(false);

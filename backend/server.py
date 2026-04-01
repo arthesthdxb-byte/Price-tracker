@@ -248,6 +248,9 @@ def get_apify_token() -> str:
             return token_vals[0]
     return raw.strip()
 
+COUNTRY_CODES = {"uae": "UAE", "kuwait": "Kuwait", "bahrain": "Bahrain", "qatar": "Qatar", "kw": "Kuwait", "bh": "Bahrain", "qa": "Qatar"}
+VALID_COUNTRIES = ["UAE", "Kuwait", "Bahrain", "Qatar"]
+
 def extract_slug(url: str) -> str:
     try:
         parts = url.split("/")
@@ -257,6 +260,20 @@ def extract_slug(url: str) -> str:
     except Exception:
         pass
     return ""
+
+def extract_country(url: str) -> str:
+    try:
+        parts = url.lower().split("/")
+        for part in parts:
+            if part in COUNTRY_CODES:
+                return COUNTRY_CODES[part]
+        host = url.split("/")[2] if len(url.split("/")) > 2 else ""
+        if "kw." in host: return "Kuwait"
+        if "bh." in host: return "Bahrain"
+        if "qa." in host: return "Qatar"
+    except Exception:
+        pass
+    return "UAE"
 
 def parse_apify_items(menu_items: list) -> dict:
     items = {}
@@ -330,15 +347,15 @@ async def root():
     return {"message": "Menu Price Tracker API"}
 
 @api_router.post("/baseline")
-async def upload_baseline(data: BaselineUpload):
+async def upload_baseline(data: BaselineUpload, country: str = "UAE"):
     try:
         with get_db() as conn:
             cur = conn.cursor()
-            cur.execute("DELETE FROM baseline")
+            cur.execute("DELETE FROM baseline WHERE country = %s", (country,))
             for brand_name, items in data.brands.items():
                 cur.execute(
-                    "INSERT INTO baseline (brand_name, items, baseline_date, updated_at) VALUES (%s, %s, %s, %s)",
-                    (brand_name, json.dumps(items), data.baseline_date, datetime.now(timezone.utc))
+                    "INSERT INTO baseline (brand_name, items, baseline_date, updated_at, country) VALUES (%s, %s, %s, %s, %s)",
+                    (brand_name, json.dumps(items), data.baseline_date, datetime.now(timezone.utc), country)
                 )
             cur.close()
         return {
@@ -350,11 +367,11 @@ async def upload_baseline(data: BaselineUpload):
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/baseline")
-async def get_baseline():
+async def get_baseline(country: str = "UAE"):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT brand_name, items, baseline_date FROM baseline")
+            cur.execute("SELECT brand_name, items, baseline_date FROM baseline WHERE country = %s", (country,))
             rows = cur.fetchall()
             cur.close()
         if not rows:
@@ -373,18 +390,18 @@ async def get_baseline():
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.post("/scrape")
-async def upload_scrape(data: ScrapeUpload):
+async def upload_scrape(data: ScrapeUpload, country: str = "UAE"):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-            cur.execute("SELECT own_brand FROM brand_groups")
+            cur.execute("SELECT own_brand FROM brand_groups WHERE country = %s", (country,))
             own_brands = [r["own_brand"] for r in cur.fetchall()]
 
-            cur.execute("SELECT brand_name, items FROM baseline")
+            cur.execute("SELECT brand_name, items FROM baseline WHERE country = %s", (country,))
             baseline = {r["brand_name"]: r["items"] for r in cur.fetchall()}
 
-            cur.execute("SELECT scrape_date, brand_name, items FROM scrapes WHERE scrape_date != %s", (data.scrape_date,))
+            cur.execute("SELECT scrape_date, brand_name, items FROM scrapes WHERE scrape_date != %s AND country = %s", (data.scrape_date, country))
             existing_scrapes = cur.fetchall()
 
             previous_by_brand = {}
@@ -399,7 +416,7 @@ async def upload_scrape(data: ScrapeUpload):
                         if scrape["scrape_date"] == most_recent_previous:
                             previous_by_brand[scrape["brand_name"]] = scrape["items"]
 
-            cur.execute("DELETE FROM scrapes WHERE scrape_date = %s", (data.scrape_date,))
+            cur.execute("DELETE FROM scrapes WHERE scrape_date = %s AND country = %s", (data.scrape_date, country))
 
             new_baselines = []
             comparison_data = {}
@@ -409,8 +426,8 @@ async def upload_scrape(data: ScrapeUpload):
                 baseline_items = baseline.get(brand_name, {})
                 if not baseline_items:
                     cur.execute(
-                        "INSERT INTO baseline (brand_name, items, baseline_date, updated_at) VALUES (%s, %s, %s, %s)",
-                        (brand_name, json.dumps(items), data.scrape_date, datetime.now(timezone.utc))
+                        "INSERT INTO baseline (brand_name, items, baseline_date, updated_at, country) VALUES (%s, %s, %s, %s, %s)",
+                        (brand_name, json.dumps(items), data.scrape_date, datetime.now(timezone.utc), country)
                     )
                     new_baselines.append(brand_name)
                     baseline_items = items
@@ -420,11 +437,11 @@ async def upload_scrape(data: ScrapeUpload):
                 vs_previous = compare_items(previous_items, items) if previous_items else None
 
                 cur.execute(
-                    "INSERT INTO scrapes (scrape_date, brand_name, items, vs_baseline, vs_previous, uploaded_at) VALUES (%s, %s, %s, %s, %s, %s)",
+                    "INSERT INTO scrapes (scrape_date, brand_name, items, vs_baseline, vs_previous, uploaded_at, country) VALUES (%s, %s, %s, %s, %s, %s, %s)",
                     (data.scrape_date, brand_name, json.dumps(items),
                      json.dumps(vs_baseline.model_dump()),
                      json.dumps(vs_previous.model_dump()) if vs_previous else None,
-                     datetime.now(timezone.utc))
+                     datetime.now(timezone.utc), country)
                 )
                 brands_count += 1
                 comparison_data[brand_name] = {
@@ -439,11 +456,11 @@ async def upload_scrape(data: ScrapeUpload):
                     cur.execute("UPDATE scrapes SET ai_summary = %s WHERE scrape_date = %s", (ai_summary, data.scrape_date))
 
             if data.set_as_baseline:
-                cur.execute("DELETE FROM baseline")
+                cur.execute("DELETE FROM baseline WHERE country = %s", (country,))
                 for brand_name, items in data.brands.items():
                     cur.execute(
-                        "INSERT INTO baseline (brand_name, items, baseline_date, updated_at) VALUES (%s, %s, %s, %s)",
-                        (brand_name, json.dumps(items), data.scrape_date, datetime.now(timezone.utc))
+                        "INSERT INTO baseline (brand_name, items, baseline_date, updated_at, country) VALUES (%s, %s, %s, %s, %s)",
+                        (brand_name, json.dumps(items), data.scrape_date, datetime.now(timezone.utc), country)
                     )
 
             cur.close()
@@ -461,11 +478,11 @@ async def upload_scrape(data: ScrapeUpload):
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/dashboard")
-async def get_dashboard():
+async def get_dashboard(country: str = "UAE"):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT scrape_date, brand_name, items, vs_baseline, vs_previous FROM scrapes")
+            cur.execute("SELECT scrape_date, brand_name, items, vs_baseline, vs_previous FROM scrapes WHERE country = %s", (country,))
             all_scrapes = cur.fetchall()
             cur.close()
 
@@ -510,11 +527,11 @@ async def get_dashboard():
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/brand-history/{brand_name}")
-async def get_brand_history(brand_name: str):
+async def get_brand_history(brand_name: str, country: str = "UAE"):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT scrape_date, vs_baseline, vs_previous, ai_summary FROM scrapes WHERE brand_name = %s", (brand_name,))
+            cur.execute("SELECT scrape_date, vs_baseline, vs_previous, ai_summary FROM scrapes WHERE brand_name = %s AND country = %s", (brand_name, country))
             scrapes = cur.fetchall()
             cur.close()
 
@@ -559,15 +576,15 @@ async def get_brand_history(brand_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/items/{brand_name}")
-async def get_items_history(brand_name: str):
+async def get_items_history(brand_name: str, country: str = "UAE"):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT items, baseline_date FROM baseline WHERE brand_name = %s LIMIT 1", (brand_name,))
+            cur.execute("SELECT items, baseline_date FROM baseline WHERE brand_name = %s AND country = %s LIMIT 1", (brand_name, country))
             baseline_row = cur.fetchone()
             baseline_items = baseline_row["items"] if baseline_row else {}
             baseline_date = baseline_row["baseline_date"] if baseline_row else "24-Feb-25"
-            cur.execute("SELECT scrape_date, items FROM scrapes WHERE brand_name = %s", (brand_name,))
+            cur.execute("SELECT scrape_date, items FROM scrapes WHERE brand_name = %s AND country = %s", (brand_name, country))
             scrapes = cur.fetchall()
             cur.close()
 
@@ -607,11 +624,11 @@ async def get_items_history(brand_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/compare/{target_date}")
-async def compare_with_date(target_date: str):
+async def compare_with_date(target_date: str, country: str = "UAE"):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT scrape_date, brand_name, items FROM scrapes")
+            cur.execute("SELECT scrape_date, brand_name, items FROM scrapes WHERE country = %s", (country,))
             all_scrapes = cur.fetchall()
             cur.close()
 
@@ -649,13 +666,13 @@ async def compare_with_date(target_date: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/all-history")
-async def get_all_history():
+async def get_all_history(country: str = "UAE"):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT own_brand FROM brand_groups")
+            cur.execute("SELECT own_brand FROM brand_groups WHERE country = %s", (country,))
             own_brands = [r["own_brand"] for r in cur.fetchall()]
-            cur.execute("SELECT scrape_date, brand_name, vs_baseline FROM scrapes")
+            cur.execute("SELECT scrape_date, brand_name, vs_baseline FROM scrapes WHERE country = %s", (country,))
             all_scrapes = cur.fetchall()
             cur.close()
 
@@ -698,13 +715,13 @@ async def get_all_history():
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/npd")
-async def get_npd(target_date: str = None, baseline_date: str = None, latest_date: str = None, brand_filter: str = None):
+async def get_npd(target_date: str = None, baseline_date: str = None, latest_date: str = None, brand_filter: str = None, country: str = "UAE"):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT scrape_date, brand_name, items FROM scrapes")
+            cur.execute("SELECT scrape_date, brand_name, items FROM scrapes WHERE country = %s", (country,))
             all_scrapes = cur.fetchall()
-            cur.execute("SELECT own_brand, competitors FROM brand_groups")
+            cur.execute("SELECT own_brand, competitors FROM brand_groups WHERE country = %s", (country,))
             brand_group_rows = cur.fetchall()
             own_brands = [r["own_brand"] for r in brand_group_rows]
             cur.close()
@@ -803,11 +820,11 @@ async def get_npd(target_date: str = None, baseline_date: str = None, latest_dat
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/npd-ai-summary")
-async def get_npd_ai_summary(target_date: str = None, baseline_date: str = None, latest_date: str = None):
+async def get_npd_ai_summary(target_date: str = None, baseline_date: str = None, latest_date: str = None, country: str = "UAE"):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT scrape_date, brand_name, items FROM scrapes")
+            cur.execute("SELECT scrape_date, brand_name, items FROM scrapes WHERE country = %s", (country,))
             all_scrapes = cur.fetchall()
             cur.close()
 
@@ -842,7 +859,7 @@ async def get_npd_ai_summary(target_date: str = None, baseline_date: str = None,
 
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT own_brand FROM brand_groups")
+            cur.execute("SELECT own_brand FROM brand_groups WHERE country = %s", (country,))
             own_brands = [r["own_brand"] for r in cur.fetchall()]
             cur.close()
 
@@ -868,10 +885,10 @@ async def get_npd_ai_summary(target_date: str = None, baseline_date: str = None,
         if summary:
             with get_db() as conn:
                 cur = conn.cursor()
-                cur.execute("""INSERT INTO npd_summaries (latest_date, previous_date, summary, created_at) 
-                                VALUES (%s, %s, %s, %s)
+                cur.execute("""INSERT INTO npd_summaries (latest_date, previous_date, summary, country, created_at) 
+                                VALUES (%s, %s, %s, %s, %s)
                                 ON CONFLICT (latest_date, previous_date) DO UPDATE SET summary = EXCLUDED.summary, created_at = EXCLUDED.created_at""",
-                            (sel_latest, sel_baseline, summary, datetime.now(timezone.utc)))
+                            (sel_latest, sel_baseline, summary, country, datetime.now(timezone.utc)))
                 cur.close()
             return {"success": True, "summary": summary, "latest_date": sel_latest, "previous_date": sel_baseline, "cached": False}
         else:
@@ -882,13 +899,13 @@ async def get_npd_ai_summary(target_date: str = None, baseline_date: str = None,
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/npd-brand-comparison")
-async def get_npd_brand_comparison(brand: str, baseline_date: str = None, latest_date: str = None):
+async def get_npd_brand_comparison(brand: str, baseline_date: str = None, latest_date: str = None, country: str = "UAE"):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT scrape_date, brand_name, items FROM scrapes")
+            cur.execute("SELECT scrape_date, brand_name, items FROM scrapes WHERE country = %s", (country,))
             all_scrapes = cur.fetchall()
-            cur.execute("SELECT own_brand, competitors FROM brand_groups")
+            cur.execute("SELECT own_brand, competitors FROM brand_groups WHERE country = %s", (country,))
             brand_group_rows = cur.fetchall()
             cur.close()
 
@@ -979,11 +996,11 @@ Write in plain text only — no markdown, asterisks, bold, or headers. Keep it t
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.post("/npd-ai-summary/regenerate")
-async def regenerate_npd_ai_summary_endpoint(baseline_date: str = None, latest_date: str = None):
+async def regenerate_npd_ai_summary_endpoint(baseline_date: str = None, latest_date: str = None, country: str = "UAE"):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT DISTINCT scrape_date FROM scrapes")
+            cur.execute("SELECT DISTINCT scrape_date FROM scrapes WHERE country = %s", (country,))
             all_dates = [r["scrape_date"] for r in cur.fetchall()]
             cur.close()
 
@@ -1001,7 +1018,7 @@ async def regenerate_npd_ai_summary_endpoint(baseline_date: str = None, latest_d
             cur.execute("DELETE FROM npd_summaries WHERE latest_date = %s AND previous_date = %s", (sel_latest, sel_baseline))
             cur.close()
 
-        return await get_npd_ai_summary(baseline_date=sel_baseline, latest_date=sel_latest)
+        return await get_npd_ai_summary(baseline_date=sel_baseline, latest_date=sel_latest, country=country)
     except HTTPException:
         raise
     except Exception as e:
@@ -1094,11 +1111,11 @@ async def add_new_brands(data: NewBrandsData):
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/brand-groups")
-async def get_brand_groups():
+async def get_brand_groups(country: str = "UAE"):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT own_brand, competitors, group_order FROM brand_groups ORDER BY group_order")
+            cur.execute("SELECT own_brand, competitors, group_order FROM brand_groups WHERE country = %s ORDER BY group_order", (country,))
             rows = cur.fetchall()
             cur.close()
         groups = [{"own_brand": r["own_brand"], "competitors": list(r["competitors"]) if r["competitors"] else [], "group_order": r["group_order"]} for r in rows]
@@ -1107,13 +1124,13 @@ async def get_brand_groups():
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.post("/brand-groups")
-async def create_brand_group(group: BrandGroupCreate):
+async def create_brand_group(group: BrandGroupCreate, country: str = "UAE"):
     try:
         with get_db() as conn:
             cur = conn.cursor()
             cur.execute(
-                "INSERT INTO brand_groups (own_brand, competitors, group_order) VALUES (%s, %s, %s)",
-                (group.own_brand, group.competitors, group.group_order)
+                "INSERT INTO brand_groups (own_brand, competitors, group_order, country) VALUES (%s, %s, %s, %s)",
+                (group.own_brand, group.competitors, group.group_order, country)
             )
             cur.close()
         return {"success": True, "message": "Brand group created"}
@@ -1265,16 +1282,16 @@ Write in plain text only — do NOT use markdown, asterisks, bold, headers, or a
         return None
 
 @api_router.post("/regenerate-summary/{scrape_date}")
-async def regenerate_summary(scrape_date: str):
+async def regenerate_summary(scrape_date: str, country: str = "UAE"):
     try:
         with get_db() as conn:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT brand_name, vs_baseline FROM scrapes WHERE scrape_date = %s", (scrape_date,))
+            cur.execute("SELECT brand_name, vs_baseline FROM scrapes WHERE scrape_date = %s AND country = %s", (scrape_date, country))
             scrapes = cur.fetchall()
             if not scrapes:
                 raise HTTPException(status_code=404, detail="No data found for this date")
 
-            cur.execute("SELECT own_brand FROM brand_groups")
+            cur.execute("SELECT own_brand FROM brand_groups WHERE country = %s", (country,))
             own_brands = [r["own_brand"] for r in cur.fetchall()]
 
             comparison_data = {}
@@ -1286,7 +1303,7 @@ async def regenerate_summary(scrape_date: str):
 
             ai_summary = await generate_ai_summary(scrape_date, comparison_data)
             if ai_summary:
-                cur.execute("UPDATE scrapes SET ai_summary = %s WHERE scrape_date = %s", (ai_summary, scrape_date))
+                cur.execute("UPDATE scrapes SET ai_summary = %s WHERE scrape_date = %s AND country = %s", (ai_summary, scrape_date, country))
                 cur.close()
             else:
                 cur.close()
@@ -1400,7 +1417,7 @@ async def apify_pull(dataset_id: str = None, token: str = None, run_id: str = No
         scrape_date = now.strftime("%-d-%b-%y").replace("-0", "-")
         logger.info(f"[Apify Pull] Fetched {len(jsonl_records)} records from dataset {dataset_id}")
 
-        brands = {}
+        country_brands = {}
         skipped_empty = []
         auto_registered = []
 
@@ -1414,31 +1431,42 @@ async def apify_pull(dataset_id: str = None, token: str = None, run_id: str = No
             if not menu_items:
                 skipped_empty.append(slug)
                 continue
+            country = extract_country(url)
             brand_name = get_brand_for_slug(slug)
             if not brand_name:
                 brand_name = auto_register_slug(slug)
-                auto_registered.append({"slug": slug, "brand_name": brand_name})
+                auto_registered.append({"slug": slug, "brand_name": brand_name, "country": country})
             items = parse_apify_items(menu_items)
             if items:
-                if brand_name in brands:
-                    brands[brand_name].update(items)
+                if country not in country_brands:
+                    country_brands[country] = {}
+                if brand_name in country_brands[country]:
+                    country_brands[country][brand_name].update(items)
                 else:
-                    brands[brand_name] = items
+                    country_brands[country][brand_name] = items
 
-        if not brands:
+        if not country_brands:
             return {"success": False, "error": "No valid brands parsed", "auto_registered": auto_registered, "skipped_empty": skipped_empty}
 
-        scrape_payload = ScrapeUpload(scrape_date=scrape_date, brands=brands, set_as_baseline=False)
-        result = await upload_scrape(scrape_payload)
+        results = {}
+        total_brands = 0
+        total_items = 0
+        for ctry, brands in country_brands.items():
+            scrape_payload = ScrapeUpload(scrape_date=scrape_date, brands=brands, set_as_baseline=False)
+            result = await upload_scrape(scrape_payload, country=ctry)
+            results[ctry] = result
+            total_brands += len(brands)
+            total_items += sum(len(v) for v in brands.values())
 
         return {
             "success": True,
             "scrape_date": scrape_date,
-            "brands_parsed": len(brands),
-            "total_items": sum(len(v) for v in brands.values()),
+            "brands_parsed": total_brands,
+            "total_items": total_items,
             "auto_registered": auto_registered,
             "skipped_empty": skipped_empty,
-            "scrape_result": result
+            "countries": list(country_brands.keys()),
+            "scrape_results": results
         }
     except HTTPException:
         raise
@@ -1481,7 +1509,7 @@ async def apify_webhook(request: Request):
         else:
             raise HTTPException(status_code=400, detail="Invalid payload")
 
-        brands = {}
+        country_brands = {}
         skipped_empty = []
         auto_registered = []
 
@@ -1495,33 +1523,42 @@ async def apify_webhook(request: Request):
             if not menu_items:
                 skipped_empty.append(slug)
                 continue
+            country = extract_country(url)
             brand_name = get_brand_for_slug(slug)
             if not brand_name:
                 brand_name = auto_register_slug(slug)
-                auto_registered.append({"slug": slug, "brand_name": brand_name})
+                auto_registered.append({"slug": slug, "brand_name": brand_name, "country": country})
             items = parse_apify_items(menu_items)
             if items:
-                if brand_name in brands:
-                    brands[brand_name].update(items)
+                if country not in country_brands:
+                    country_brands[country] = {}
+                if brand_name in country_brands[country]:
+                    country_brands[country][brand_name].update(items)
                 else:
-                    brands[brand_name] = items
+                    country_brands[country][brand_name] = items
 
-        if not brands:
+        if not country_brands:
             return {"success": False, "error": "No valid brands parsed", "auto_registered": auto_registered, "skipped_empty": skipped_empty}
 
-        logger.info(f"[Apify] Parsed {len(brands)} brands, {sum(len(v) for v in brands.values())} total items")
+        total_brands = sum(len(b) for b in country_brands.values())
+        total_items = sum(sum(len(v) for v in b.values()) for b in country_brands.values())
+        logger.info(f"[Apify] Parsed {total_brands} brands across {list(country_brands.keys())}, {total_items} total items")
 
-        scrape_payload = ScrapeUpload(scrape_date=scrape_date, brands=brands, set_as_baseline=False)
-        result = await upload_scrape(scrape_payload)
+        results = {}
+        for ctry, brands in country_brands.items():
+            scrape_payload = ScrapeUpload(scrape_date=scrape_date, brands=brands, set_as_baseline=False)
+            result = await upload_scrape(scrape_payload, country=ctry)
+            results[ctry] = result
 
         return {
             "success": True,
             "scrape_date": scrape_date,
-            "brands_parsed": len(brands),
-            "total_items": sum(len(v) for v in brands.values()),
+            "brands_parsed": total_brands,
+            "total_items": total_items,
             "auto_registered": auto_registered,
             "skipped_empty": skipped_empty,
-            "scrape_result": result
+            "countries": list(country_brands.keys()),
+            "scrape_results": results
         }
     except HTTPException:
         raise
@@ -1712,6 +1749,13 @@ async def startup_event():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_scrapes_date ON scrapes(scrape_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_scrapes_brand ON scrapes(brand_name)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_scrapes_date_brand ON scrapes(scrape_date, brand_name)")
+
+            for tbl in ['baseline', 'scrapes', 'brand_groups', 'slug_mappings']:
+                cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name=%s AND column_name='country'", (tbl,))
+                if not cur.fetchone():
+                    cur.execute(f"ALTER TABLE {tbl} ADD COLUMN country TEXT NOT NULL DEFAULT 'UAE'")
+                    logger.info(f"Added country column to {tbl}")
+
             conn.commit()
             logger.info("Database schema initialized")
 

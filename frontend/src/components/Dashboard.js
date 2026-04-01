@@ -108,7 +108,10 @@ const NpdItemCard = ({ item, type }) => {
   );
 };
 
+const COUNTRIES = ['UAE', 'Kuwait', 'Bahrain', 'Qatar'];
+
 const Dashboard = () => {
+  const [country, setCountry] = useState('UAE');
   const [hasBaseline, setHasBaseline] = useState(false);
   const [baselineDate, setBaselineDate] = useState('24-Feb-25');
   const [dashboardData, setDashboardData] = useState(null);
@@ -157,11 +160,11 @@ const Dashboard = () => {
 
   const allBrands = useMemo(() => brandGroups.flatMap(g => [g.own, ...g.competitors]), [brandGroups]);
 
-  useEffect(() => { checkBaseline(); loadDashboard(); loadBrandGroups(); }, []);
+  useEffect(() => { checkBaseline(); loadDashboard(); loadBrandGroups(); }, [country]);
 
   const checkBaseline = async () => {
     try {
-      const response = await axios.get(`${API}/baseline`);
+      const response = await axios.get(`${API}/baseline?country=${country}`);
       setHasBaseline(response.data.exists);
       if (response.data.baseline_date) setBaselineDate(response.data.baseline_date);
     } catch (error) { console.error('Error checking baseline:', error); }
@@ -169,14 +172,15 @@ const Dashboard = () => {
 
   const loadDashboard = async () => {
     try {
-      const response = await axios.get(`${API}/dashboard`);
+      const response = await axios.get(`${API}/dashboard?country=${country}`);
       if (response.data.has_data) setDashboardData(response.data);
+      else setDashboardData(null);
     } catch (error) { console.error('Error loading dashboard:', error); }
   };
 
   const loadBrandGroups = async () => {
     try {
-      const response = await axios.get(`${API}/brand-groups`);
+      const response = await axios.get(`${API}/brand-groups?country=${country}`);
       const groups = (response.data.brand_groups || []).map(g => ({
         own: g.own_brand, competitors: g.competitors || [], group_order: g.group_order
       }));
@@ -191,7 +195,7 @@ const Dashboard = () => {
 
   const loadCompareData = async (targetDate) => {
     try {
-      const response = await axios.get(`${API}/compare/${encodeURIComponent(targetDate)}`);
+      const response = await axios.get(`${API}/compare/${encodeURIComponent(targetDate)}?country=${country}`);
       setCompareData(response.data);
     } catch (error) { toast.error('Error loading comparison'); }
   };
@@ -282,7 +286,7 @@ const Dashboard = () => {
     setUploading(true);
     try {
       const brands = await parseExcelFile(stagedMasterFile);
-      const response = await axios.post(`${API}/baseline`, { brands, baseline_date: baselineDate });
+      const response = await axios.post(`${API}/baseline?country=${country}`, { brands, baseline_date: baselineDate });
       if (response.data.success) {
         toast.success(`Master uploaded — ${response.data.brands_count} brands, ${response.data.items_count} items`);
         setHasBaseline(true); setShowUploadModal(false); setStagedMasterFile(null);
@@ -297,7 +301,7 @@ const Dashboard = () => {
     setUploading(true);
     try {
       const brands = await parseScrapeFiles(stagedScrapeFiles);
-      const response = await axios.post(`${API}/scrape`, { scrape_date: scrapeDate, brands, set_as_baseline: setAsBaseline });
+      const response = await axios.post(`${API}/scrape?country=${country}`, { scrape_date: scrapeDate, brands, set_as_baseline: setAsBaseline });
       if (response.data.success) {
         let msg = `Scrape uploaded — ${response.data.brands_count} brands analyzed`;
         if (setAsBaseline) msg += ' (Baseline updated)';
@@ -313,30 +317,30 @@ const Dashboard = () => {
 
   const viewBrandHistory = async (brandName) => {
     try {
-      const response = await axios.get(`${API}/brand-history/${encodeURIComponent(brandName)}`);
+      const response = await axios.get(`${API}/brand-history/${encodeURIComponent(brandName)}?country=${country}`);
       setBrandHistory(response.data); setSelectedBrand(brandName); setHistoryCompareMode('baseline'); setViewMode('brand-history');
     } catch (error) { toast.error('Error loading brand history'); }
   };
 
   const viewItemsHistory = async (brandName) => {
     try {
-      const response = await axios.get(`${API}/items/${encodeURIComponent(brandName)}`);
+      const response = await axios.get(`${API}/items/${encodeURIComponent(brandName)}?country=${country}`);
       setItemsHistory(response.data); setSelectedBrand(brandName); setItemFilter('all'); setViewMode('items-history');
     } catch (error) { toast.error('Error loading items history'); }
   };
 
   const viewAllHistory = async () => {
     try {
-      const response = await axios.get(`${API}/all-history`);
+      const response = await axios.get(`${API}/all-history?country=${country}`);
       setAllHistory(response.data); setViewMode('all-history');
     } catch (error) { toast.error('Error loading all history'); }
   };
 
   const npdQueryParams = (bl, lt) => {
-    const params = [];
+    const params = [`country=${country}`];
     if (bl) params.push(`baseline_date=${encodeURIComponent(bl)}`);
     if (lt) params.push(`latest_date=${encodeURIComponent(lt)}`);
-    return params.length > 0 ? `?${params.join('&')}` : '';
+    return `?${params.join('&')}`;
   };
 
   const viewComboInsights = () => setViewMode('combo-insights');
@@ -394,7 +398,7 @@ const Dashboard = () => {
     setNpdComparisonLoading(true);
     setNpdBrandComparison(null);
     try {
-      const res = await axios.get(`${API}/npd-brand-comparison?brand=${encodeURIComponent(brand)}&baseline_date=${npdBaselineDate}&latest_date=${npdLatestDate}`);
+      const res = await axios.get(`${API}/npd-brand-comparison?brand=${encodeURIComponent(brand)}&baseline_date=${npdBaselineDate}&latest_date=${npdLatestDate}&country=${country}`);
       setNpdBrandComparison(res.data);
     } catch (err) { console.error('Error loading brand comparison:', err); }
     setNpdComparisonLoading(false);
@@ -414,7 +418,7 @@ const Dashboard = () => {
     if (!newBrandOwn.trim()) { toast.error('Enter an own brand name'); return; }
     try {
       const competitors = newBrandCompetitors.split(',').map(s => s.trim()).filter(Boolean);
-      await axios.post(`${API}/brand-groups`, { own_brand: newBrandOwn.trim(), competitors, group_order: brandGroups.length + 1 });
+      await axios.post(`${API}/brand-groups?country=${country}`, { own_brand: newBrandOwn.trim(), competitors, group_order: brandGroups.length + 1 });
       toast.success(`Added ${newBrandOwn.trim()}`); setNewBrandOwn(''); setNewBrandCompetitors('');
       await loadBrandGroups(); await loadDashboard();
     } catch (error) { toast.error('Error adding brand group'); }
@@ -433,7 +437,7 @@ const Dashboard = () => {
     try {
       await axios.delete(`${API}/scrape/${encodeURIComponent(date)}`);
       toast.success(`Deleted ${date}`);
-      const response = await axios.get(`${API}/all-history`);
+      const response = await axios.get(`${API}/all-history?country=${country}`);
       setAllHistory(response.data);
     } catch (error) { toast.error('Error deleting scrape date'); }
   };
@@ -572,7 +576,21 @@ const Dashboard = () => {
         <div style={{ width: '100%', maxWidth: 900 }}>
           <div style={{ textAlign: 'center', marginBottom: 48 }}>
             <h1 style={{ fontSize: 36, fontWeight: 800, color: T.primary, margin: 0, letterSpacing: '-0.5px' }}>MENU PRICE TRACKER</h1>
-            <p style={{ color: T.label, fontSize: 16, margin: '8px 0 0' }}>Talabat UAE | Competitive Pricing Intelligence</p>
+            <p style={{ color: T.label, fontSize: 16, margin: '8px 0 0' }}>Talabat | Competitive Pricing Intelligence</p>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 16 }}>
+              {COUNTRIES.map(c => (
+                <button key={c} onClick={() => setCountry(c)}
+                  style={{
+                    padding: '8px 20px', borderRadius: 20, fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                    border: country === c ? `2px solid ${T.primary}` : `1px solid ${T.border}`,
+                    background: country === c ? T.primary : '#FFF',
+                    color: country === c ? '#FFF' : T.body,
+                    transition: 'all 0.2s ease',
+                  }}>
+                  {c}
+                </button>
+              ))}
+            </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 20 }}>
             {modules.map(m => {
@@ -893,15 +911,15 @@ const Dashboard = () => {
   }
 
   if (viewMode === 'combo-insights') {
-    return <ComboInsightsView onBack={() => setViewMode('home')} />;
+    return <ComboInsightsView onBack={() => setViewMode('home')} country={country} />;
   }
 
   if (viewMode === 'menu-gaps') {
-    return <MenuGapAnalyzerView onBack={() => setViewMode('home')} />;
+    return <MenuGapAnalyzerView onBack={() => setViewMode('home')} country={country} />;
   }
 
   if (viewMode === 'competitor-price') {
-    return <CompetitorPriceCheckView onBack={() => setViewMode('home')} />;
+    return <CompetitorPriceCheckView onBack={() => setViewMode('home')} country={country} />;
   }
 
   if (viewMode === 'all-history' && allHistory) {
